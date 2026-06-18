@@ -75,33 +75,51 @@ npm install
 
 ---
 
-## Next Steps (Not Started)
+## Deployment
 
-### Priority 1 — Required to run the demo
+The project has two separately deployed services. Deploy in this order — frontend depends on knowing the backend URL first.
 
-#### 1. Provision Render PostgreSQL
-- Create a new Render Postgres instance
-- Copy the external `DATABASE_URL` into `backend/.env`
-- Run schema: `psql $DATABASE_URL -f backend/src/db/schema.sql`
-- Run seed: `cd backend && npm run seed`
-- Verify: `psql $DATABASE_URL -c "SELECT count(*) FROM fitment;"`  — should return 8
+### 1. Render PostgreSQL (database)
 
-#### 2. Deploy backend to Render
-- Create a new Render Web Service pointed at the GitHub repo
-- Root directory: `backend`
-- Build command: `npm install`
-- Start command: `npm start`
-- Add all env vars from `.env.example` in the Render dashboard
-- Confirm `/health` returns `{"ok":true}`
+1. render.com → **New → PostgreSQL** → free tier → create
+2. Copy the **External Database URL**
+3. Paste it as `DATABASE_URL` in `backend/.env`
+4. Initialize the schema and seed demo data:
+   ```bash
+   psql $DATABASE_URL -f backend/src/db/schema.sql
+   cd backend && npm install && npm run seed
+   ```
+5. Verify: `psql $DATABASE_URL -c "SELECT count(*) FROM fitment;"` → should return **8**
 
-#### 3. Deploy frontend to Vercel
-- Import `V1-Brian/magnaflow-bot` into Vercel
-- Set root directory: `frontend`
-- Add env var: `VITE_API_URL=https://your-render-service.onrender.com`
-- Deploy and verify the chat widget loads and sends messages
+### 2. Render Web Service (backend)
 
-#### 4. End-to-end smoke test
-Run the three demo scenarios from the README:
+1. render.com → **New → Web Service** → connect `V1-Brian/magnaflow-bot`
+2. Settings:
+   - **Root directory:** `backend`
+   - **Build command:** `npm install`
+   - **Start command:** `npm start`
+3. Add all env vars from `backend/.env.example` in the Render dashboard
+4. Deploy — confirm: `GET https://your-service.onrender.com/health` returns `{"ok":true}`
+
+> **Free tier cold start:** Render spins down after 15 min of inactivity. First request after idle takes ~30s. Fine for testing — upgrade to the $7/mo always-on tier before a live demo.
+
+### 3. Vercel (frontend)
+
+1. vercel.com → **Add New Project** → import `V1-Brian/magnaflow-bot`
+2. Set **Root Directory** to `frontend`
+3. Add env var: `VITE_API_URL=https://your-render-service.onrender.com`
+4. Deploy
+
+Vercel auto-deploys on every push to `master` — no manual steps needed after this.
+
+---
+
+## Next Steps
+
+### Priority 1 — Verify the live deployment
+
+#### 1. End-to-end smoke test
+Run the three demo scenarios after deploying:
 - 2019 Tacoma TRD Off-Road 3.5L, stock → SKU 19293
 - Same truck, 3-inch lift → SKU 19583
 - 2021 F-150 5.0L → SKU 19835
