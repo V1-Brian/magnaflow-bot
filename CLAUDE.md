@@ -103,6 +103,8 @@ The project has two separately deployed services. Deploy in this order — front
 
 > **Free tier cold start:** Render spins down after 15 min of inactivity. First request after idle takes ~30s. Fine for testing — upgrade to the $7/mo always-on tier before a live demo.
 
+> **Twilio / ElevenLabs are voice-channel only.** They're not needed to get the web chat bot live. `TWILIO_*` and `ELEVENLABS_*` can stay blank until you tackle Priority 2 (voice channel) below — the chat flow works fully without them.
+
 ### 3. Vercel (frontend)
 
 1. vercel.com → **Add New Project** → import `V1-Brian/magnaflow-bot`
