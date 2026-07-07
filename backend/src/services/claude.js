@@ -12,7 +12,8 @@ async function getFitmentContext(conversationHistory) {
       { "year": number|null, "make": string|null, "model": string|null,
         "submodel": string|null, "engineLiters": number|null,
         "partType": string|null, "lifted": boolean, "ready": boolean }
-      "ready" = true only when you have enough to do a meaningful parts lookup.
+      "ready" = true as soon as you have year + make + model. Do NOT wait for sound preference, submodel, or engine — those refine results but are not required to attempt a lookup.
+      "lifted" = true only if the customer explicitly mentions a lift kit or lifted vehicle.
       "partType" must be one of: cat-back, axle-back, direct-fit-cat, universal-cat, replacement-exhaust, or null.`,
     messages: conversationHistory,
   });
