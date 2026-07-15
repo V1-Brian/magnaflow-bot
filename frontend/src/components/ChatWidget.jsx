@@ -8,7 +8,7 @@ const SESSION_ID = uuidv4();
 
 export default function ChatWidget() {
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: "Hi! I'm the MagnaFlow Parts Advisor. What year is your vehicle?" }
+    { role: 'assistant', text: "Hi! I'm the MagnaFlow Parts Advisor. Tell me about your vehicle — year, make, model, and engine if you know it." }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
