@@ -52,10 +52,12 @@ async function getFitmentContext(conversationHistory) {
     return null;
   }
   const params = toolUse.input;
+  console.log('Extracted params:', JSON.stringify(params));
 
   if (!params.ready) return null;
 
   const { matches, needsQualifier } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
+  console.log(`lookupParts -> ${matches.length} match(es), needsQualifier: ${JSON.stringify(needsQualifier.map((n) => n.qualifierType))}`);
 
   if (needsQualifier.length > 0) return { matches: [], needsQualifier };
   if (matches.length === 0) {
