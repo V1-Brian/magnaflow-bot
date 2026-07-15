@@ -22,7 +22,8 @@ async function getFitmentContext(conversationHistory) {
   let params;
   try {
     params = JSON.parse(extractionResponse.content[0].text);
-  } catch {
+  } catch (err) {
+    console.error('Extraction JSON parse failed. Raw response:', extractionResponse.content[0].text);
     return null;
   }
 
@@ -31,7 +32,10 @@ async function getFitmentContext(conversationHistory) {
   const { matches, needsQualifier } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
 
   if (needsQualifier.length > 0) return { matches: [], needsQualifier };
-  if (matches.length === 0) return null;
+  if (matches.length === 0) {
+    console.error('No fitment matches for extracted params:', JSON.stringify(params));
+    return null;
+  }
 
   logRecommendation({ ...params, skus: matches.map((m) => m.sku) }).catch((err) =>
     console.error('recommendation_log insert failed:', err)
