@@ -4,28 +4,51 @@ import { lookupParts, logRecommendation } from './fitment.js';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const EXTRACT_VEHICLE_PARAMS_TOOL = {
+  name: 'extract_vehicle_params',
+  description: 'Extract vehicle fitment parameters from the conversation so far.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      year: { type: ['number', 'null'] },
+      make: { type: ['string', 'null'] },
+      model: { type: ['string', 'null'] },
+      submodel: { type: ['string', 'null'] },
+      engineLiters: { type: ['number', 'null'] },
+      partType: {
+        type: ['string', 'null'],
+        enum: ['cat-back', 'axle-back', 'direct-fit-cat', 'universal-cat', 'replacement-exhaust', null],
+      },
+      lifted: { type: 'boolean', description: 'True only if the customer explicitly mentions a lift kit or lifted vehicle.' },
+      qualifiers: {
+        type: 'object',
+        description: 'Any fitment-relevant detail the customer has explicitly stated beyond year/make/model/engine (e.g. {"rear_suspension": "leaf_spring"}). Only include a key if the customer actually said it — never guess. Empty object if none stated.',
+      },
+      ready: {
+        type: 'boolean',
+        description: 'True as soon as year + make + model are known. Do not wait for sound preference, submodel, or engine — those refine results but are not required to attempt a lookup.',
+      },
+    },
+    required: ['year', 'make', 'model', 'submodel', 'engineLiters', 'partType', 'lifted', 'qualifiers', 'ready'],
+  },
+};
+
 async function getFitmentContext(conversationHistory) {
   const extractionResponse = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 512,
-    system: `Extract vehicle parameters from this conversation. Return ONLY valid JSON with these fields:
-      { "year": number|null, "make": string|null, "model": string|null,
-        "submodel": string|null, "engineLiters": number|null,
-        "partType": string|null, "lifted": boolean, "qualifiers": object, "ready": boolean }
-      "ready" = true as soon as you have year + make + model. Do NOT wait for sound preference, submodel, or engine — those refine results but are not required to attempt a lookup.
-      "lifted" = true only if the customer explicitly mentions a lift kit or lifted vehicle.
-      "partType" must be one of: cat-back, axle-back, direct-fit-cat, universal-cat, replacement-exhaust, or null.
-      "qualifiers" is an object of any fitment-relevant detail the customer has explicitly stated beyond year/make/model/engine (e.g. {"rear_suspension": "leaf_spring"}). Only include a key if the customer actually said it — never guess. Use {} if none stated.`,
+    system: 'Extract vehicle fitment parameters from this conversation using the extract_vehicle_params tool.',
+    tools: [EXTRACT_VEHICLE_PARAMS_TOOL],
+    tool_choice: { type: 'tool', name: 'extract_vehicle_params' },
     messages: conversationHistory,
   });
 
-  let params;
-  try {
-    params = JSON.parse(extractionResponse.content[0].text);
-  } catch (err) {
-    console.error('Extraction JSON parse failed. Raw response:', extractionResponse.content[0].text);
+  const toolUse = extractionResponse.content.find((block) => block.type === 'tool_use');
+  if (!toolUse) {
+    console.error('Extraction call returned no tool_use block:', JSON.stringify(extractionResponse.content));
     return null;
   }
+  const params = toolUse.input;
 
   if (!params.ready) return null;
 
