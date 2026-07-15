@@ -13,7 +13,10 @@ const EXTRACT_VEHICLE_PARAMS_TOOL = {
       year: { type: ['number', 'null'] },
       make: { type: ['string', 'null'] },
       model: { type: ['string', 'null'] },
-      submodel: { type: ['string', 'null'] },
+      submodel: {
+        type: ['string', 'null'],
+        description: 'The trim level the customer stated for their vehicle (e.g. "Tradesman", "Rebel", "Laramie", "TRD Off-Road"). If the customer already gave a trim earlier in the conversation, do not overwrite it with their answer to a later qualifier question (e.g. "Classic", "redesigned", "DT body") — those answers go in the qualifiers field below instead, even if they sound like they could be a trim. Only change this field if the customer explicitly states a different trim for their vehicle.',
+      },
       engineLiters: { type: ['number', 'null'] },
       partType: {
         type: ['string', 'null'],
@@ -22,7 +25,7 @@ const EXTRACT_VEHICLE_PARAMS_TOOL = {
       lifted: { type: 'boolean', description: 'True only if the customer explicitly mentions a lift kit or lifted vehicle.' },
       qualifiers: {
         type: 'object',
-        description: 'Any fitment-relevant detail the customer has explicitly stated beyond year/make/model/engine (e.g. {"rear_suspension": "leaf_spring"}). Only include a key if the customer actually said it — never guess. Empty object if none stated.',
+        description: 'Any fitment-relevant detail the customer has explicitly stated beyond year/make/model/engine, keyed to the qualifier type the system asked about (e.g. {"rear_suspension": "leaf_spring"}). This is also where an answer to a system clarifying question belongs (e.g. if asked "is it the Classic or the redesigned Ram 1500?" and the customer says "Classic", set {"rear_suspension": "leaf_spring"} here — never put that answer in submodel, model, or anywhere else). Only include a key if the customer actually said it — never guess. Empty object if none stated.',
       },
       ready: {
         type: 'boolean',
