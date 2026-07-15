@@ -1,0 +1,17 @@
+{
+  "name": "magnaflow-bot-qa",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Playwright-based verification that our fitment data matches MagnaFlow's live site. Kept separate from backend/ so Chromium never ships with the customer-facing web service.",
+  "scripts": {
+    "postinstall": "playwright install chromium",
+    "verify-catalog": "node run-catalog-check.js",
+    "spot-check": "node spot-check.js"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0",
+    "pg": "^8.11.5",
+    "dotenv": "^16.4.5"
+  }
+}

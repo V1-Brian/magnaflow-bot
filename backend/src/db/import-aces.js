@@ -77,7 +77,7 @@ async function importACES(filePath) {
         const existing = await client.query(
           `SELECT id FROM vehicles WHERE year=$1 AND make=$2 AND model=$3
            AND COALESCE(submodel,'')=COALESCE($4,'')
-           AND COALESCE(engine_liters,0)=COALESCE($5,0)`,
+           AND COALESCE(engine_liters,0)=COALESCE($5::numeric,0)`,
           [year, make, model, submodel, engineLiters]
         );
         vehicleId = existing.rows[0]?.id;

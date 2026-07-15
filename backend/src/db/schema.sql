@@ -7,7 +7,7 @@ CREATE TABLE vehicles (
   model         VARCHAR(64) NOT NULL,
   submodel      VARCHAR(128),
   engine_liters NUMERIC(3,1),
-  engine_config VARCHAR(32),
+  engine_config VARCHAR(64),
   body_style    VARCHAR(64),
   drive_type    VARCHAR(16),
   source        VARCHAR(16) DEFAULT 'manual',
@@ -50,7 +50,46 @@ CREATE TABLE part_attributes (
   id        SERIAL PRIMARY KEY,
   part_id   INTEGER REFERENCES parts(id) ON DELETE CASCADE,
   attr_key  VARCHAR(64) NOT NULL,
-  attr_val  TEXT NOT NULL
+  attr_val  TEXT NOT NULL,
+  UNIQUE(part_id, attr_key)
+);
+
+-- Qualifiers table (ACES-style)
+-- A named type/value pair a fitment can be gated on beyond year/make/model/engine,
+-- e.g. qualifier_type='rear_suspension', qualifier_value='leaf_spring'
+CREATE TABLE qualifiers (
+  id              SERIAL PRIMARY KEY,
+  qualifier_type  VARCHAR(64) NOT NULL,
+  qualifier_value VARCHAR(64) NOT NULL,
+  label           VARCHAR(128) NOT NULL,
+  UNIQUE(qualifier_type, qualifier_value)
+);
+
+-- Fitment qualifiers join table
+-- A fitment row with no linked qualifiers applies unconditionally once vehicle fields match.
+-- A fitment row with one or more linked qualifiers only applies when all of them are satisfied.
+CREATE TABLE fitment_qualifiers (
+  fitment_id   INTEGER REFERENCES fitment(id) ON DELETE CASCADE,
+  qualifier_id INTEGER REFERENCES qualifiers(id) ON DELETE CASCADE,
+  PRIMARY KEY (fitment_id, qualifier_id)
+);
+
+-- Recommendation log
+-- One row per final SKU recommendation returned to a customer, written fire-and-forget
+-- from the chat service. Used by qa/spot-check.js to sample live recommendations for
+-- verification against the real MagnaFlow site, decoupled from the request path.
+CREATE TABLE recommendation_log (
+  id           SERIAL PRIMARY KEY,
+  year         INTEGER,
+  make         VARCHAR(64),
+  model        VARCHAR(64),
+  submodel     VARCHAR(128),
+  engine_liters NUMERIC(3,1),
+  qualifiers   JSONB,
+  skus         VARCHAR(32)[] NOT NULL,
+  checked_at   TIMESTAMPTZ,
+  check_result JSONB,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Indexes for fast vehicle lookups
@@ -60,3 +99,5 @@ CREATE INDEX idx_fitment_vehicle ON fitment(vehicle_id);
 CREATE INDEX idx_fitment_part ON fitment(part_id);
 CREATE INDEX idx_parts_sku ON parts(sku);
 CREATE INDEX idx_parts_type ON parts(part_type);
+CREATE INDEX idx_fitment_qualifiers_fitment ON fitment_qualifiers(fitment_id);
+CREATE INDEX idx_recommendation_log_unchecked ON recommendation_log(checked_at) WHERE checked_at IS NULL;

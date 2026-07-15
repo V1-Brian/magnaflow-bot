@@ -33,8 +33,10 @@ All repos live in `C:\Dev Projects\` — clone there.
 - `src/services/tts.js` — ElevenLabs TTS synthesis, saves to `/tmp`, returns URL for Twilio
 - `src/services/cache.js` — Cloudflare Workers KV fetch for pre-cached product pages
 - `src/prompts/system.js` — Full Claude system prompt with qualification flow, rules, tone
-- `src/db/schema.sql` — PostgreSQL schema: `vehicles`, `parts`, `fitment`, `part_attributes`
-- `src/db/seed.js` — Demo seed: 10 vehicles, 4 parts, 8 fitment mappings, attributes
+- `src/db/schema.sql` — PostgreSQL schema: `vehicles`, `parts`, `fitment`, `part_attributes`, `qualifiers`, `fitment_qualifiers`, `recommendation_log`
+- `src/db/migrations/001_qualifiers_and_log.sql` — additive migration for the already-provisioned Render DB (schema.sql is CREATE TABLE-only and fails on existing tables — run this instead against a live install)
+- `src/db/data/catalog.json` — catalog data (vehicles/parts/fitment/qualifiers/attributes) — `seed.js` loads from here, this is what you edit to add vehicles
+- `src/db/seed.js` — loads `data/catalog.json` and idempotently upserts everything (safe to re-run)
 - `src/db/import-aces.js` — ACES XML + PIES XML importer (run when MagnaFlow provides data)
 - `backend/.env.example` — All required env vars documented
 - `backend/package.json` — Dependencies: `@anthropic-ai/sdk`, `express`, `pg`, `twilio`, etc.
@@ -55,6 +57,13 @@ All repos live in `C:\Dev Projects\` — clone there.
 ### Scripts
 - `scripts/cache-pages.js` — Pre-caches 4 MagnaFlow product pages into Cloudflare KV
 
+### Verification (`qa/`)
+Separate package (own `package.json` + Playwright dependency) so Chromium never has to ship with the customer-facing Render web service.
+- `qa/verify-fitment.js` — `verifyVehicle(...)` drives MagnaFlow's real "Shop by Vehicle" tool for one vehicle+qualifier combo and diffs the SKUs it lists against what we expect
+- `qa/run-catalog-check.js` — offline batch check of the entire `catalog.json` against the live site; run with `npm run verify-catalog` (from `qa/`), writes a JSON mismatch report
+- `qa/spot-check.js` — samples a few unchecked rows from `recommendation_log` (real customer recommendations) and verifies them against the live site; intended to run as its own scheduled job (e.g. a Render Cron Job), not inside the chat web service
+- Not wired up yet: no Render Cron Job has been created for `spot-check.js`. Confirm Render plan/resources before scheduling it — see Priority 2 below.
+
 ### Deployment fixes applied
 - `frontend/package.json` — moved `vite` and `@vitejs/plugin-react` from `devDependencies` to `dependencies` (Vercel runs `npm install --production` and was missing the build tool)
 - `vercel.json` — added at repo root with explicit `buildCommand`, `outputDirectory`, and `installCommand` pointing into `frontend/` so deployment config is in source control and not dependent on Vercel dashboard settings
@@ -63,10 +72,16 @@ All repos live in `C:\Dev Projects\` — clone there.
 - `backend/src/prompts/system.js` — bot now opens with one broad "tell me about your vehicle" question and only follows up on missing fields, instead of asking year → make → model sequentially
 - `backend/src/services/claude.js` — extraction pass now marks `ready: true` as soon as year + make + model are known; sound preference no longer blocks the fitment lookup (it is a post-lookup filter, not a pre-lookup requirement)
 
+### Catalog expansion + fitment qualifiers (2026-07-07)
+- Catalog grew from 10 vehicles / 4 parts to **88 vehicles / 65 parts / 154 fitment rows**, sourced by research agents reading real magnaflow.com product pages (not scraped/crawled — magnaflow.com disallows `/search` in robots.txt and the vehicle picker is JS-rendered) — covers Toyota (Tacoma/4Runner/Tundra), Ford (F-150/Super Duty/Bronco/Mustang), Chevy/GMC (Silverado/Sierra/Colorado/Canyon/Camaro), Jeep (Wrangler/Gladiator), Ram (1500/2500/3500), Dodge Challenger.
+- Goal: a good-enough demo to secure the real ACES/PIES data feed from MagnaFlow — once that lands, catalog and qualifier coverage expand for free via `import-aces.js` with no schema changes.
+- **Fitment qualifiers**: some fitment isn't determined by year/make/model/engine alone — e.g. Ram sold two structurally different Ram 1500 trucks in parallel for 2019-2023 (redesigned coil-spring "DT" body vs carryover leaf-spring "Classic" body), with different real SKUs for the same nominal vehicle. New `qualifiers` + `fitment_qualifiers` tables model this generically (ACES-style: qualifier type/value pairs attached at the fitment level). `fitment.js`'s `lookupParts()` now returns `{ matches, needsQualifier }` — if candidate parts disagree on an unanswered qualifier, it surfaces a clarifying question instead of guessing. `claude.js` and `system.js` were updated so the bot asks that question before presenting any parts. Only this one Ram case is seeded with real qualifier data (by design — not researched across the whole catalog since real ACES data will supersede it).
+- `backend/src/db/data/catalog.json` is the new source of truth for seed data; `seed.js` was rewritten to load from it and upsert idempotently (safe to re-run, unlike the old array-index-based version).
+
 ### Database
 - Schema initialized and demo data seeded against Render Postgres (as of 2026-07-07)
-- 10 vehicles, 4 parts, 8 fitment mappings, 8 part attributes
-- Verified: `SELECT count(*) FROM fitment` → 8
+- 88 vehicles, 65 parts, 154 fitment rows, 2 qualifiers (rear suspension: leaf/coil spring, Ram 1500 vs Classic)
+- Verify after reseeding: `psql $DATABASE_URL -c "SELECT count(*) FROM fitment;"` → should return **154**
 
 ---
 
@@ -108,7 +123,9 @@ The project has two separately deployed services. Deploy in this order — front
    psql $DATABASE_URL -f backend/src/db/schema.sql
    cd backend && npm install && npm run seed
    ```
-5. Verify: `psql $DATABASE_URL -c "SELECT count(*) FROM fitment;"` → should return **8**
+5. Verify: `psql $DATABASE_URL -c "SELECT count(*) FROM fitment;"` → should return **154**
+
+> **Updating an already-provisioned DB:** `schema.sql` is CREATE TABLE-only and will fail with "relation already exists" if you re-run it against a DB that's already been initialized. To bring an existing install up to date with new tables (`qualifiers`, `fitment_qualifiers`, `recommendation_log`), run `psql $DATABASE_URL -f backend/src/db/migrations/001_qualifiers_and_log.sql` instead — it's additive and safe to re-run. Then `npm run seed` as usual (it's idempotent — safe to re-run any time `catalog.json` changes).
 
 ### 2. Render Web Service (backend)
 
@@ -122,7 +139,7 @@ The project has two separately deployed services. Deploy in this order — front
 
 > **Free tier cold start:** Render spins down after 15 min of inactivity. First request after idle takes ~30s. Fine for testing — upgrade to the $7/mo always-on tier before a live demo.
 
-> **Twilio / ElevenLabs are voice-channel only.** They're not needed to get the web chat bot live. `TWILIO_*` and `ELEVENLABS_*` can stay blank until you tackle Priority 2 (voice channel) below — the chat flow works fully without them.
+> **Twilio / ElevenLabs are voice-channel only.** They're not needed to get the web chat bot live. `TWILIO_*` and `ELEVENLABS_*` can stay blank until you tackle Priority 3 (voice channel) below — the chat flow works fully without them.
 
 ### 3. Vercel (frontend)
 
@@ -148,14 +165,20 @@ Run the three demo scenarios after deploying:
 
 Test tip: open with the full vehicle description in one message — the bot should ask at most one follow-up before returning results.
 
+#### 2. Qualifier smoke test
+Ask about a "2021 Ram 1500 Tradesman 5.7L" — the bot should ask whether it's the redesigned Ram 1500 or a "Ram 1500 Classic" (leaf vs coil rear suspension) before giving a SKU, instead of guessing. This exercises the new `qualifiers`/`fitment_qualifiers` mechanism end-to-end.
+
+#### 3. Run the offline catalog check
+From `qa/`: `npm install && npm run verify-catalog` — drives MagnaFlow's real site for every vehicle/qualifier combo in `catalog.json` and reports any SKU mismatches. Playwright's first run needs Chromium installed (`postinstall` handles this). Selectors in `qa/verify-fitment.js` are a best-effort mapping of the site's flow — if a run errors out on a missing element, inspect the live site and adjust the locators there.
+
 ---
 
-### Priority 2 — Expand demo catalog data
+### Priority 2 — Wire up live spot-checks (optional)
 
-Currently only 4 parts are seeded. Other vehicles in the DB (Silverado, Mustang, Wrangler, Ram 1500) have no fitment mappings and will return empty. Options:
+`claude.js` already logs every resolved recommendation to `recommendation_log`. `qa/spot-check.js` samples a few unchecked rows and verifies them against the live site, but nothing calls it yet on a schedule.
 
-- **Manual:** Add real MagnaFlow SKUs from magnaflow.com for the seeded vehicles into `backend/src/db/seed.js`
-- **ACES/PIES import:** When MagnaFlow provides data files, run `npm run import-aces` — no schema changes needed
+- Add a Render Cron Job pointed at `node qa/spot-check.js` (its own build — `npm install` inside `qa/`, not the backend service) so Chromium never touches the customer-facing web service
+- Confirm Render plan/resources can handle a scheduled Playwright run before enabling — do this deliberately, not as a side effect of another change
 
 ---
 
@@ -226,12 +249,17 @@ Currently only 4 parts are seeded. Other vehicles in the DB (Silverado, Mustang,
 | File | Purpose |
 |---|---|
 | `backend/src/prompts/system.js` | Claude system prompt — edit qualification flow and tone here |
-| `backend/src/services/claude.js` | Two-pass Claude orchestration — extraction + response |
-| `backend/src/db/schema.sql` | Database schema — authoritative structure |
-| `backend/src/db/seed.js` | Demo data — add vehicles/parts/fitment here for the demo |
-| `backend/src/services/fitment.js` | SQL query logic — tune vehicle matching here |
+| `backend/src/services/claude.js` | Two-pass Claude orchestration — extraction + response, qualifier ambiguity handling |
+| `backend/src/db/schema.sql` | Database schema — authoritative structure for a fresh install |
+| `backend/src/db/migrations/001_qualifiers_and_log.sql` | Additive migration for the already-provisioned Render DB |
+| `backend/src/db/data/catalog.json` | Catalog data — add vehicles/parts/fitment/qualifiers here, not in seed.js |
+| `backend/src/db/seed.js` | Loads `data/catalog.json` into Postgres, idempotent |
+| `backend/src/services/fitment.js` | SQL query logic — tune vehicle matching + qualifier resolution here |
 | `frontend/src/components/ChatWidget.jsx` | Main chat UI — session, message loop, state |
 | `vercel.json` | Vercel build config — routes to frontend/, do not move or delete |
+| `qa/verify-fitment.js` | Playwright check of one vehicle against the live MagnaFlow site |
+| `qa/run-catalog-check.js` | Offline batch verification of the whole catalog — run after catalog changes |
+| `qa/spot-check.js` | Samples `recommendation_log` for live spot-checks — not yet on a schedule |
 
 ## Claude Model
 

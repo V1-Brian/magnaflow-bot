@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM_PROMPT } from '../prompts/system.js';
-import { lookupParts } from './fitment.js';
+import { lookupParts, logRecommendation } from './fitment.js';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -11,10 +11,11 @@ async function getFitmentContext(conversationHistory) {
     system: `Extract vehicle parameters from this conversation. Return ONLY valid JSON with these fields:
       { "year": number|null, "make": string|null, "model": string|null,
         "submodel": string|null, "engineLiters": number|null,
-        "partType": string|null, "lifted": boolean, "ready": boolean }
+        "partType": string|null, "lifted": boolean, "qualifiers": object, "ready": boolean }
       "ready" = true as soon as you have year + make + model. Do NOT wait for sound preference, submodel, or engine — those refine results but are not required to attempt a lookup.
       "lifted" = true only if the customer explicitly mentions a lift kit or lifted vehicle.
-      "partType" must be one of: cat-back, axle-back, direct-fit-cat, universal-cat, replacement-exhaust, or null.`,
+      "partType" must be one of: cat-back, axle-back, direct-fit-cat, universal-cat, replacement-exhaust, or null.
+      "qualifiers" is an object of any fitment-relevant detail the customer has explicitly stated beyond year/make/model/engine (e.g. {"rear_suspension": "leaf_spring"}). Only include a key if the customer actually said it — never guess. Use {} if none stated.`,
     messages: conversationHistory,
   });
 
@@ -27,8 +28,16 @@ async function getFitmentContext(conversationHistory) {
 
   if (!params.ready) return null;
 
-  const parts = await lookupParts(params);
-  return parts.length > 0 ? parts : null;
+  const { matches, needsQualifier } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
+
+  if (needsQualifier.length > 0) return { matches: [], needsQualifier };
+  if (matches.length === 0) return null;
+
+  logRecommendation({ ...params, skus: matches.map((m) => m.sku) }).catch((err) =>
+    console.error('recommendation_log insert failed:', err)
+  );
+
+  return { matches, needsQualifier: [] };
 }
 
 export async function chat(conversationHistory, userMessage) {
@@ -37,17 +46,29 @@ export async function chat(conversationHistory, userMessage) {
     { role: 'user', content: userMessage },
   ];
 
-  const fitmentResults = await getFitmentContext(updatedHistory);
+  const fitmentContext = await getFitmentContext(updatedHistory);
 
-  const messagesForClaude = fitmentResults
-    ? [
-        ...updatedHistory,
-        {
-          role: 'user',
-          content: `[SYSTEM FITMENT DATA — do not repeat this to the customer, use it to form your recommendation]:\n${JSON.stringify(fitmentResults, null, 2)}`,
-        },
-      ]
-    : updatedHistory;
+  let messagesForClaude = updatedHistory;
+  if (fitmentContext?.needsQualifier?.length) {
+    const clarifications = fitmentContext.needsQualifier
+      .map((nq) => nq.options.map((o) => o.label).join(' — OR — '))
+      .join('; ');
+    messagesForClaude = [
+      ...updatedHistory,
+      {
+        role: 'user',
+        content: `[SYSTEM: fitment for this vehicle depends on an additional detail that hasn't been answered yet. Ask the customer to clarify before presenting any parts — do not guess: ${clarifications}]`,
+      },
+    ];
+  } else if (fitmentContext?.matches?.length) {
+    messagesForClaude = [
+      ...updatedHistory,
+      {
+        role: 'user',
+        content: `[SYSTEM FITMENT DATA — do not repeat this to the customer, use it to form your recommendation]:\n${JSON.stringify(fitmentContext.matches, null, 2)}`,
+      },
+    ];
+  }
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
@@ -57,6 +78,7 @@ export async function chat(conversationHistory, userMessage) {
   });
 
   const assistantMessage = response.content[0].text;
+  const fitmentResults = fitmentContext?.matches?.length ? fitmentContext.matches : null;
 
   return {
     message: assistantMessage,
