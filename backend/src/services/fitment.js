@@ -56,7 +56,7 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, p
 
   const result = await pool.query(query, values);
 
-  const matches = [];
+  const matchesBySku = new Map();
   const pendingByType = new Map(); // qualifier_type -> Map(value -> label)
 
   for (const { required_qualifiers, ...part } of result.rows) {
@@ -73,8 +73,13 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, p
       continue; // don't surface as a confirmed match until the qualifier is answered
     }
 
-    matches.push(part);
+    // The same part can legitimately match through more than one vehicle/fitment row
+    // (e.g. the customer's answer was broad enough to span multiple trims) — never
+    // show the same SKU to the customer twice.
+    if (!matchesBySku.has(part.sku)) matchesBySku.set(part.sku, part);
   }
+
+  const matches = [...matchesBySku.values()];
 
   const needsQualifier = [...pendingByType.entries()].map(([qualifierType, valueMap]) => ({
     qualifierType,
