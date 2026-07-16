@@ -1,7 +1,7 @@
 {
   "qualifiers": [
-    { "type": "rear_suspension", "value": "leaf_spring", "label": "Ram 1500 Classic (leaf-spring rear suspension, carryover body)" },
-    { "type": "rear_suspension", "value": "coil_spring", "label": "Redesigned Ram 1500 (coil-spring rear suspension, DT body)" }
+    { "type": "rear_suspension", "value": "leaf_spring", "label": "Ram 1500 Classic, with leaf-spring rear suspension" },
+    { "type": "rear_suspension", "value": "coil_spring", "label": "the redesigned Ram 1500, with coil-spring rear suspension" }
   ],
 
   "vehicles": [
