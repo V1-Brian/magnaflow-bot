@@ -48,4 +48,19 @@ export const CASES = [
     turns: ['2015 Honda Civic EX, 1.8L, looking for a cat-back'],
     expectNoFitmentYet: true,
   },
+  {
+    // No trim given, so this spans every 2021 Ram 1500 5.7L trim (Rebel + Tradesman).
+    // Rebel's fitment (19430, 19429) was never qualifier-gated — in reality Rebel only
+    // ever existed in the redesigned coil-spring body, so it has no "Classic" variant —
+    // meaning it always shows up regardless of the qualifier answer. Confirmed correct
+    // via direct DB query on 2026-07-07: NOT a bug, a real consequence of only
+    // qualifier-gating the Tradesman trim in this demo catalog (see catalog.json notes).
+    name: 'Ram 1500, no trim given — answers "coil spring"',
+    turns: [
+      '2021 Ram 1500, 5.7L HEMI',
+      'Coil spring rear suspension — the redesigned one, not the Classic.',
+    ],
+    expectSkus: ['19429', '19430'],
+    rejectSkus: ['15363'],
+  },
 ];
