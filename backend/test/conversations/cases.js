@@ -50,17 +50,31 @@ export const CASES = [
   },
   {
     // No trim given, so this spans every 2021 Ram 1500 5.7L trim (Rebel + Tradesman).
-    // Rebel's fitment (19430, 19429) was never qualifier-gated — in reality Rebel only
-    // ever existed in the redesigned coil-spring body, so it has no "Classic" variant —
-    // meaning it always shows up regardless of the qualifier answer. Confirmed correct
-    // via direct DB query on 2026-07-07: NOT a bug, a real consequence of only
-    // qualifier-gating the Tradesman trim in this demo catalog (see catalog.json notes).
-    name: 'Ram 1500, no trim given — answers "coil spring"',
+    // 19429 only fits Rebel in our data (not Tradesman) — genuine fitment difference or
+    // just an incomplete cross-link from seeding, we can't tell from here. Per the
+    // 2026-07-07 decision: when trim isn't given and any candidate part doesn't cover
+    // every trim in play, hold everything back and ask, rather than risk showing a part
+    // that doesn't actually fit. So this should now ask for trim, not return SKUs
+    // directly — a deliberate behavior change from an earlier version of this test.
+    name: 'Ram 1500, no trim given — should ask for trim before presenting parts',
     turns: [
       '2021 Ram 1500, 5.7L HEMI',
       'Coil spring rear suspension — the redesigned one, not the Classic.',
     ],
-    expectSkus: ['19429', '19430'],
-    rejectSkus: ['15363'],
+    expectNoFitmentYet: true,
+  },
+  {
+    // The confirmed real case: 19265 is SS-only per its own product page; ZL1 doesn't
+    // get it. Trim not given, so this should hold back and ask which trim before
+    // showing anything — same mechanism as the Ram case above, but here it's guarding
+    // against a genuine fitment difference, not just a data-linking gap.
+    name: 'Camaro 6.2L, no trim given — should ask for trim (SS vs ZL1 fitment differs)',
+    turns: ['2019 Chevy Camaro, 6.2L V8, looking for an exhaust'],
+    expectNoFitmentYet: true,
+  },
+  {
+    name: 'Camaro SS 6.2L — trim given, should resolve directly',
+    turns: ['2019 Chevy Camaro SS, 6.2L V8'],
+    expectSkus: ['19265', '19336', '19266'],
   },
 ];

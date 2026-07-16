@@ -12,7 +12,14 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // matches once the vehicle fields match. A row gated on a qualifier only becomes a
 // match once its qualifier is answered and matches; while unanswered, it's held back
 // and surfaced in `needsQualifier` instead of being guessed at.
-export async function lookupParts({ year, make, model, submodel, engineLiters, partType, lifted = false, qualifiers = {} }) {
+//
+// Separately: submodel/bodyStyle/driveType/engineConfig are vehicle-identifying fields
+// the customer may not have stated. If, once qualifiers are resolved, some candidate
+// part only applies to a subset of the distinct values seen for one of those fields
+// (not every one), that field genuinely determines fitment — everything is held back
+// and that field is surfaced the same way an unanswered qualifier is, rather than
+// guessing which trim/body/drivetrain the customer actually has.
+export async function lookupParts({ year, make, model, submodel, engineLiters, bodyStyle, driveType, engineConfig, partType, lifted = false, qualifiers = {} }) {
   const conditions = ['1=1'];
   const values = [];
   let idx = 1;
@@ -22,11 +29,18 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, p
   if (model)        { conditions.push(`LOWER(v.model) = LOWER($${idx++})`); values.push(model); }
   if (submodel)     { conditions.push(`LOWER(v.submodel) = LOWER($${idx++})`); values.push(submodel); }
   if (engineLiters) { conditions.push(`v.engine_liters = $${idx++}`);       values.push(engineLiters); }
+  if (bodyStyle)    { conditions.push(`LOWER(v.body_style) = LOWER($${idx++})`); values.push(bodyStyle); }
+  if (driveType)    { conditions.push(`LOWER(v.drive_type) = LOWER($${idx++})`); values.push(driveType); }
+  if (engineConfig) { conditions.push(`LOWER(v.engine_config) = LOWER($${idx++})`); values.push(engineConfig); }
   if (partType)     { conditions.push(`LOWER(p.part_type) = LOWER($${idx++})`); values.push(partType); }
   if (lifted)       { conditions.push(`p.is_lifted_compatible = true`); }
 
   const query = `
     SELECT
+      v.submodel AS vehicle_submodel,
+      v.body_style AS vehicle_body_style,
+      v.drive_type AS vehicle_drive_type,
+      v.engine_config AS vehicle_engine_config,
       p.sku,
       p.series,
       p.part_type,
@@ -50,16 +64,38 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, p
     LEFT JOIN fitment_qualifiers fq ON fq.fitment_id = f.id
     LEFT JOIN qualifiers q ON q.id = fq.qualifier_id
     WHERE ${conditions.join(' AND ')}
-    GROUP BY f.id, p.id, f.notes
+    GROUP BY f.id, p.id, f.notes, v.submodel, v.body_style, v.drive_type, v.engine_config
     ORDER BY p.price ASC
   `;
 
   const result = await pool.query(query, values);
 
+  const AMBIGUITY_DIMENSIONS = [
+    { given: submodel, column: 'vehicle_submodel', qualifierType: 'trim' },
+    { given: bodyStyle, column: 'vehicle_body_style', qualifierType: 'body_style' },
+    { given: driveType, column: 'vehicle_drive_type', qualifierType: 'drive_type' },
+    { given: engineConfig, column: 'vehicle_engine_config', qualifierType: 'engine_config' },
+  ].filter((d) => !d.given);
+
   const matchesBySku = new Map();
   const pendingByType = new Map(); // qualifier_type -> Map(value -> label)
+  const dimValuesSeen = new Map(AMBIGUITY_DIMENSIONS.map((d) => [d.qualifierType, new Set()]));
+  const dimValuesBySku = new Map(AMBIGUITY_DIMENSIONS.map((d) => [d.qualifierType, new Map()]));
 
-  for (const { required_qualifiers, ...part } of result.rows) {
+  for (const row of result.rows) {
+    const { required_qualifiers, vehicle_submodel, vehicle_body_style, vehicle_drive_type, vehicle_engine_config, ...part } = row;
+    const rowDimValues = {
+      trim: vehicle_submodel,
+      body_style: vehicle_body_style,
+      drive_type: vehicle_drive_type,
+      engine_config: vehicle_engine_config,
+    };
+
+    for (const dim of AMBIGUITY_DIMENSIONS) {
+      const val = rowDimValues[dim.qualifierType];
+      if (val) dimValuesSeen.get(dim.qualifierType).add(val);
+    }
+
     const required = required_qualifiers ?? [];
     const mismatched = required.some((rq) => rq.type in qualifiers && qualifiers[rq.type] !== rq.value);
     if (mismatched) continue; // this row doesn't apply to the customer's actual vehicle
@@ -77,6 +113,25 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, p
     // (e.g. the customer's answer was broad enough to span multiple trims) — never
     // show the same SKU to the customer twice.
     if (!matchesBySku.has(part.sku)) matchesBySku.set(part.sku, part);
+
+    for (const dim of AMBIGUITY_DIMENSIONS) {
+      const val = rowDimValues[dim.qualifierType];
+      if (!val) continue;
+      const bySku = dimValuesBySku.get(dim.qualifierType);
+      if (!bySku.has(part.sku)) bySku.set(part.sku, new Set());
+      bySku.get(part.sku).add(val);
+    }
+  }
+
+  for (const dim of AMBIGUITY_DIMENSIONS) {
+    const allValues = dimValuesSeen.get(dim.qualifierType);
+    if (allValues.size < 2) continue; // only one value in play — nothing to disambiguate
+    const bySku = dimValuesBySku.get(dim.qualifierType);
+    const dimMatters = [...bySku.values()].some((vals) => vals.size < allValues.size);
+    if (dimMatters) {
+      matchesBySku.clear();
+      pendingByType.set(dim.qualifierType, new Map([...allValues].map((v) => [v, v])));
+    }
   }
 
   const matches = [...matchesBySku.values()];

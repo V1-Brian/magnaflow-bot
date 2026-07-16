@@ -11,13 +11,28 @@ const EXTRACT_VEHICLE_PARAMS_TOOL = {
     type: 'object',
     properties: {
       year: { type: ['number', 'null'] },
-      make: { type: ['string', 'null'] },
+      make: {
+        type: ['string', 'null'],
+        description: 'The manufacturer\'s full standard name, not a nickname or abbreviation (e.g. "Chevrolet" not "Chevy", "Cadillac" not "Caddy"). Normalize even if the customer used the colloquial form.',
+      },
       model: { type: ['string', 'null'] },
       submodel: {
         type: ['string', 'null'],
         description: 'The trim level the customer stated for their vehicle (e.g. "Tradesman", "Rebel", "Laramie", "TRD Off-Road"). If the customer already gave a trim earlier in the conversation, do not overwrite it with their answer to a later qualifier question (e.g. "Classic", "redesigned", "DT body") — those answers go in the qualifiers field below instead, even if they sound like they could be a trim. Only change this field if the customer explicitly states a different trim for their vehicle.',
       },
       engineLiters: { type: ['number', 'null'] },
+      bodyStyle: {
+        type: ['string', 'null'],
+        description: 'Cab/body configuration if the customer stated it (e.g. "Crew Cab", "Quad Cab", "2-Door", "4-Door", "SuperCrew"). Null if not stated — do not guess.',
+      },
+      driveType: {
+        type: ['string', 'null'],
+        description: 'Drivetrain if the customer stated it (e.g. "4WD", "RWD", "AWD"). Null if not stated — do not guess.',
+      },
+      engineConfig: {
+        type: ['string', 'null'],
+        description: 'Engine configuration if the customer stated it beyond displacement (e.g. "V6", "V8", "V6 Twin-Turbo"). Null if not stated — do not guess.',
+      },
       partType: {
         type: ['string', 'null'],
         enum: ['cat-back', 'axle-back', 'direct-fit-cat', 'universal-cat', 'replacement-exhaust', null],
@@ -32,7 +47,7 @@ const EXTRACT_VEHICLE_PARAMS_TOOL = {
         description: 'True as soon as year + make + model are known. Do not wait for sound preference, submodel, or engine — those refine results but are not required to attempt a lookup.',
       },
     },
-    required: ['year', 'make', 'model', 'submodel', 'engineLiters', 'partType', 'lifted', 'qualifiers', 'ready'],
+    required: ['year', 'make', 'model', 'submodel', 'engineLiters', 'bodyStyle', 'driveType', 'engineConfig', 'partType', 'lifted', 'qualifiers', 'ready'],
   },
 };
 
@@ -83,7 +98,7 @@ export async function chat(conversationHistory, userMessage) {
   let messagesForClaude = updatedHistory;
   if (fitmentContext?.needsQualifier?.length) {
     const clarifications = fitmentContext.needsQualifier
-      .map((nq) => nq.options.map((o) => o.label).join(' — OR — '))
+      .map((nq) => `${nq.qualifierType.replace(/_/g, ' ')}: ${nq.options.map((o) => o.label).join(' vs. ')}`)
       .join('; ');
     messagesForClaude = [
       ...updatedHistory,
