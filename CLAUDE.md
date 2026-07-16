@@ -58,11 +58,18 @@ All repos live in `C:\Dev Projects\` — clone there.
 - `scripts/cache-pages.js` — Pre-caches 4 MagnaFlow product pages into Cloudflare KV
 
 ### Verification (`qa/`)
-Separate package (own `package.json` + Playwright dependency) so Chromium never has to ship with the customer-facing Render web service.
+Separate package (own `package.json` + Playwright dependency) so Chromium never has to ship with the customer-facing Render web service. This layer only checks catalog *data* against the live site — it never touches Claude or the chat pipeline.
 - `qa/verify-fitment.js` — `verifyVehicle(...)` drives MagnaFlow's real "Shop by Vehicle" tool for one vehicle+qualifier combo and diffs the SKUs it lists against what we expect
 - `qa/run-catalog-check.js` — offline batch check of the entire `catalog.json` against the live site; run with `npm run verify-catalog` (from `qa/`), writes a JSON mismatch report
 - `qa/spot-check.js` — samples a few unchecked rows from `recommendation_log` (real customer recommendations) and verifies them against the live site; intended to run as its own scheduled job (e.g. a Render Cron Job), not inside the chat web service
 - Not wired up yet: no Render Cron Job has been created for `spot-check.js`. Confirm Render plan/resources before scheduling it — see Priority 2 below.
+
+### Conversational test suite (`backend/test/conversations/`)
+Separate from `qa/` — this drives the real `chat()` pipeline directly (real Claude extraction + response calls, real Postgres lookup), asserting on the final SKUs. Built after two live bugs (markdown-fenced JSON breaking extraction, a qualifier answer overwriting the customer's stated trim) turned out to be invisible to `qa/`'s data-only checks, since both lived entirely in the conversation layer.
+- `backend/test/conversations/cases.js` — scripted multi-turn conversations with expected/rejected SKUs, or `expectNoFitmentYet: true` for cases that should ask a clarifying question or decline cleanly
+- `backend/test/conversations/run.js` — runner; from `backend/`: `npm run test:conversations` (or `npm run test:conversations "ram"` to filter by name substring while iterating)
+- **Requires `ANTHROPIC_API_KEY` and `DATABASE_URL` in `backend/.env`** — it makes real Anthropic API calls (~2 per conversational turn) and writes to the live `recommendation_log` table (harmless, low-volume)
+- 10/10 passing as of 2026-07-07, covering: Tacoma/F-150 golden paths, both Ram qualifier answers, a not-yet-answered qualifier, a vehicle not in the catalog, and trim-ambiguity for both a real fitment case (Camaro SS-only SKU) and a data-completeness case (Ram)
 
 ### Deployment fixes applied
 - `frontend/package.json` — moved `vite` and `@vitejs/plugin-react` from `devDependencies` to `dependencies` (Vercel runs `npm install --production` and was missing the build tool)
@@ -77,6 +84,14 @@ Separate package (own `package.json` + Playwright dependency) so Chromium never 
 - Goal: a good-enough demo to secure the real ACES/PIES data feed from MagnaFlow — once that lands, catalog and qualifier coverage expand for free via `import-aces.js` with no schema changes.
 - **Fitment qualifiers**: some fitment isn't determined by year/make/model/engine alone — e.g. Ram sold two structurally different Ram 1500 trucks in parallel for 2019-2023 (redesigned coil-spring "DT" body vs carryover leaf-spring "Classic" body), with different real SKUs for the same nominal vehicle. New `qualifiers` + `fitment_qualifiers` tables model this generically (ACES-style: qualifier type/value pairs attached at the fitment level). `fitment.js`'s `lookupParts()` now returns `{ matches, needsQualifier }` — if candidate parts disagree on an unanswered qualifier, it surfaces a clarifying question instead of guessing. `claude.js` and `system.js` were updated so the bot asks that question before presenting any parts. Only this one Ram case is seeded with real qualifier data (by design — not researched across the whole catalog since real ACES data will supersede it).
 - `backend/src/db/data/catalog.json` is the new source of truth for seed data; `seed.js` was rewritten to load from it and upsert idempotently (safe to re-run, unlike the old array-index-based version).
+
+### Extraction reliability fixes (2026-07-07)
+Found via live testing, not code review — worth understanding before touching `claude.js` or `fitment.js` again:
+- **The vehicle-extraction pass was silently broken since the original build.** It parsed Claude's response as raw JSON text, but Claude routinely wraps tool-style output in markdown code fences (` ```json ... ``` `), so `JSON.parse` failed on effectively every message with no logging — meaning the fitment DB was likely never actually consulted in production before this fix. Replaced with forced tool-use (`tool_choice: { type: 'tool', name: 'extract_vehicle_params' }`); the SDK returns an already-parsed object, eliminating this failure mode rather than patching around it.
+- **Qualifier answers were overwriting the customer's already-stated trim.** Answering "it's the Classic" correctly set `qualifiers.rear_suspension` but also overwrote `submodel` from "Tradesman" to "Classic", breaking the DB match. Fixed via tighter tool-schema descriptions telling the model qualifier answers never belong in `submodel`/`model`.
+- **Trim/body-style/drive-type/engine-config ambiguity when unspecified.** If the customer doesn't state one of these and it isn't pinned down, `lookupParts` now checks whether any candidate part fails to cover every value seen for that field — if so, everything is held back and the customer is asked, the same way an unanswered qualifier works. Confirmed via catalog analysis that this matters for real (2019 Camaro: SKU 19265 is SS-only) and not just for one seeded example. This deliberately costs an extra clarifying question in cases where the divergence is really just incomplete cross-linking in the demo seed data (e.g. Ram) rather than a genuine fitment difference — accepted trade-off, see `backend/test/conversations/cases.js` for the reasoning.
+- **Make-name normalization.** Extraction returned `"Chevy"` while the catalog stores `"Chevrolet"`; the exact-match query silently returned zero rows. Tool schema now instructs the model to normalize to the manufacturer's full name.
+- `lookupParts` also dedupes its `matches` by SKU — the same part can legitimately match through more than one fitment row (e.g. shared across trims), and should never be shown to the customer twice.
 
 ### Database
 - Schema initialized and demo data seeded against Render Postgres (as of 2026-07-07)
@@ -98,6 +113,8 @@ npm install
 > **Important:** Append `?sslmode=require` to `DATABASE_URL` when connecting from a local machine to Render Postgres, or the Node pg client will get ECONNRESET. Example:
 > `DATABASE_URL=postgresql://user:pass@host/db?sslmode=require`
 > Render's dashboard injects this automatically for server-side connections — only needed locally.
+
+> **Running the conversational test suite locally** requires both `DATABASE_URL` and `ANTHROPIC_API_KEY` populated in `backend/.env` — see "Conversational test suite" under Completed above. Without `ANTHROPIC_API_KEY` set, `npm run test:conversations` fails immediately on the first real Claude call.
 
 ### Frontend
 ```bash
@@ -156,6 +173,9 @@ Vercel auto-deploys on every push to `master` — no manual steps needed after t
 ## Next Steps
 
 ### Priority 1 — Verify the live deployment
+
+#### 0. Run the conversational test suite first
+From `backend/` (with `DATABASE_URL` and `ANTHROPIC_API_KEY` in `.env`): `npm run test:conversations`. Catches extraction/qualifier bugs against real Claude + Postgres before you ever touch the live chat — cheaper and faster than manual round-tripping through the widget and Render logs. Add a case here any time a live bug turns up (see `backend/test/conversations/cases.js` for examples and reasoning).
 
 #### 1. End-to-end smoke test
 Run the three demo scenarios after deploying:
@@ -260,6 +280,8 @@ From `qa/`: `npm install && npm run verify-catalog` — drives MagnaFlow's real 
 | `qa/verify-fitment.js` | Playwright check of one vehicle against the live MagnaFlow site |
 | `qa/run-catalog-check.js` | Offline batch verification of the whole catalog — run after catalog changes |
 | `qa/spot-check.js` | Samples `recommendation_log` for live spot-checks — not yet on a schedule |
+| `backend/test/conversations/cases.js` | Scripted multi-turn conversations + expected SKUs — add a case here after any live bug |
+| `backend/test/conversations/run.js` | Runs the conversational suite against the real Claude + Postgres pipeline |
 
 ## Claude Model
 
