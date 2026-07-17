@@ -78,7 +78,7 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
   ].filter((d) => !d.given);
 
   const matchesBySku = new Map();
-  const pendingByType = new Map(); // qualifier_type -> Map(value -> label)
+  const pendingByType = new Map(); // qualifier_type -> { kind: 'qualifier' | 'vehicle_field', values: Map(value -> label) }
   const dimValuesSeen = new Map(AMBIGUITY_DIMENSIONS.map((d) => [d.qualifierType, new Set()]));
   const dimValuesBySku = new Map(AMBIGUITY_DIMENSIONS.map((d) => [d.qualifierType, new Map()]));
 
@@ -103,8 +103,8 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
     const unanswered = required.filter((rq) => !(rq.type in qualifiers));
     if (unanswered.length > 0) {
       for (const rq of unanswered) {
-        if (!pendingByType.has(rq.type)) pendingByType.set(rq.type, new Map());
-        pendingByType.get(rq.type).set(rq.value, rq.label);
+        if (!pendingByType.has(rq.type)) pendingByType.set(rq.type, { kind: 'qualifier', values: new Map() });
+        pendingByType.get(rq.type).values.set(rq.value, rq.label);
       }
       continue; // don't surface as a confirmed match until the qualifier is answered
     }
@@ -130,15 +130,21 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
     const dimMatters = [...bySku.values()].some((vals) => vals.size < allValues.size);
     if (dimMatters) {
       matchesBySku.clear();
-      pendingByType.set(dim.qualifierType, new Map([...allValues].map((v) => [v, v])));
+      pendingByType.set(dim.qualifierType, { kind: 'vehicle_field', values: new Map([...allValues].map((v) => [v, v])) });
     }
   }
 
   const matches = [...matchesBySku.values()];
 
-  const needsQualifier = [...pendingByType.entries()].map(([qualifierType, valueMap]) => ({
+  // 'qualifier' entries are genuine fitment qualifiers (e.g. leaf vs. coil rear
+  // suspension) the customer often can't name unprompted — worth presenting as
+  // choices. 'vehicle_field' entries (trim/body style/drive type/engine config)
+  // are things the customer already knows about their own vehicle and can just
+  // type in response to a normal follow-up question.
+  const needsQualifier = [...pendingByType.entries()].map(([qualifierType, { kind, values }]) => ({
     qualifierType,
-    options: [...valueMap.entries()].map(([value, label]) => ({ value, label })),
+    kind,
+    options: [...values.entries()].map(([value, label]) => ({ value, label })),
   }));
 
   return { matches, needsQualifier };

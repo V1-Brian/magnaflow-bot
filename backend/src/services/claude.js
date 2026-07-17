@@ -95,16 +95,19 @@ export async function chat(conversationHistory, userMessage) {
 
   const fitmentContext = await getFitmentContext(updatedHistory);
 
+  // Only ask about one pending detail per turn, even if more than one is
+  // outstanding — asking several at once reads badly and the frontend can only
+  // present option buttons for a single question anyway.
+  const primaryQualifier = fitmentContext?.needsQualifier?.[0];
+
   let messagesForClaude = updatedHistory;
-  if (fitmentContext?.needsQualifier?.length) {
-    const clarifications = fitmentContext.needsQualifier
-      .map((nq) => `${nq.qualifierType.replace(/_/g, ' ')}: ${nq.options.map((o) => o.label).join(' vs. ')}`)
-      .join('; ');
+  if (primaryQualifier) {
+    const clarification = `${primaryQualifier.qualifierType.replace(/_/g, ' ')}: ${primaryQualifier.options.map((o) => o.label).join(' vs. ')}`;
     messagesForClaude = [
       ...updatedHistory,
       {
         role: 'user',
-        content: `[SYSTEM: fitment for this vehicle depends on an additional detail that hasn't been answered yet. Ask the customer to clarify before presenting any parts — do not guess: ${clarifications}]`,
+        content: `[SYSTEM: fitment for this vehicle depends on an additional detail that hasn't been answered yet. Ask the customer to clarify before presenting any parts — do not guess. Ask about only this one detail right now, even if others may follow: ${clarification}]`,
       },
     ];
   } else if (fitmentContext?.matches?.length) {
@@ -126,7 +129,10 @@ export async function chat(conversationHistory, userMessage) {
 
   const assistantMessage = response.content[0].text;
   const fitmentResults = fitmentContext?.matches?.length ? fitmentContext.matches : null;
-  const clarifyingOptions = fitmentContext?.needsQualifier?.length ? fitmentContext.needsQualifier : null;
+  // Only genuine fitment qualifiers get presented as clickable options — vehicle
+  // fields (trim, body style, etc.) are things the customer already knows and
+  // should just type in response to the question above.
+  const clarifyingOptions = primaryQualifier?.kind === 'qualifier' ? [primaryQualifier] : null;
 
   return {
     message: assistantMessage,
