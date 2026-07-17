@@ -13,7 +13,6 @@ export default function ChatWidget() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [lastFitment, setLastFitment] = useState(null);
   const [clarifyingOptions, setClarifyingOptions] = useState(null);
   const bottomRef = useRef(null);
 
@@ -36,8 +35,7 @@ export default function ChatWidget() {
         body: JSON.stringify({ message: text, sessionId: SESSION_ID }),
       });
       const data = await res.json();
-      setMessages(prev => [...prev, { role: 'assistant', text: data.reply }]);
-      if (data.fitmentResults?.length) setLastFitment(data.fitmentResults);
+      setMessages(prev => [...prev, { role: 'assistant', text: data.reply, parts: data.fitmentResults ?? null }]);
       setClarifyingOptions(data.clarifyingOptions ?? null);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', text: "Sorry, something went wrong. Please try again." }]);
@@ -54,10 +52,14 @@ export default function ChatWidget() {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px', background: '#f5f5f5', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {messages.map((m, i) => (
-          <MessageBubble key={i} role={m.role} text={m.text} />
-        ))}
-        {lastFitment?.slice(0, 3).map(part => (
-          <PartCard key={part.sku} part={part} />
+          <div key={i}>
+            <MessageBubble role={m.role} text={m.text} />
+            {m.parts?.slice(0, 3).map(part => (
+              <div key={part.sku} style={{ marginTop: 8 }}>
+                <PartCard part={part} />
+              </div>
+            ))}
+          </div>
         ))}
         {loading && <MessageBubble role="assistant" text="..." />}
         {clarifyingOptions?.length > 0 && !loading && (
