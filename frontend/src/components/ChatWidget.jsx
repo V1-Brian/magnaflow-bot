@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import MessageBubble from './MessageBubble';
 import PartCard from './PartCard';
+import OptionButtons from './OptionButtons';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SESSION_ID = uuidv4();
@@ -13,16 +14,18 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [lastFitment, setLastFitment] = useState(null);
+  const [clarifyingOptions, setClarifyingOptions] = useState(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, clarifyingOptions]);
 
-  async function sendMessage() {
-    const text = input.trim();
+  async function sendMessage(overrideText) {
+    const text = (overrideText ?? input).trim();
     if (!text || loading) return;
     setInput('');
+    setClarifyingOptions(null);
     setMessages(prev => [...prev, { role: 'user', text }]);
     setLoading(true);
 
@@ -35,6 +38,7 @@ export default function ChatWidget() {
       const data = await res.json();
       setMessages(prev => [...prev, { role: 'assistant', text: data.reply }]);
       if (data.fitmentResults?.length) setLastFitment(data.fitmentResults);
+      setClarifyingOptions(data.clarifyingOptions ?? null);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', text: "Sorry, something went wrong. Please try again." }]);
     } finally {
@@ -56,6 +60,9 @@ export default function ChatWidget() {
           <PartCard key={part.sku} part={part} />
         ))}
         {loading && <MessageBubble role="assistant" text="..." />}
+        {clarifyingOptions?.length > 0 && !loading && (
+          <OptionButtons groups={clarifyingOptions} onSelect={sendMessage} disabled={loading} />
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -68,7 +75,7 @@ export default function ChatWidget() {
           style={{ flex: 1, padding: '10px 14px', borderRadius: 8, border: '1px solid #ccc', fontSize: 15, outline: 'none' }}
         />
         <button
-          onClick={sendMessage}
+          onClick={() => sendMessage()}
           disabled={loading}
           style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontWeight: 600, cursor: 'pointer' }}
         >

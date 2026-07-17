@@ -7,3 +7,39 @@ body {
   padding: 0;
   background: #f0f0f0;
 }
+
+.msg-markdown p {
+  margin: 0 0 8px;
+}
+
+.msg-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.msg-markdown ul,
+.msg-markdown ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.msg-markdown ul:last-child,
+.msg-markdown ol:last-child {
+  margin-bottom: 0;
+}
+
+.msg-markdown li {
+  margin: 2px 0;
+}
+
+.msg-markdown li + li {
+  margin-top: 4px;
+}
+
+.msg-markdown strong {
+  font-weight: 700;
+}
+
+.msg-markdown a {
+  color: inherit;
+  text-decoration: underline;
+}

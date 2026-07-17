@@ -15,9 +15,9 @@ router.post('/', async (req, res) => {
   const history = sessions.get(sessionId) ?? [];
 
   try {
-    const { message: reply, history: updatedHistory, fitmentResults } = await chat(history, message);
+    const { message: reply, history: updatedHistory, fitmentResults, clarifyingOptions } = await chat(history, message);
     sessions.set(sessionId, updatedHistory);
-    res.json({ reply, fitmentResults: fitmentResults ?? null });
+    res.json({ reply, fitmentResults: fitmentResults ?? null, clarifyingOptions: clarifyingOptions ?? null });
   } catch (err) {
     console.error('Chat error:', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });

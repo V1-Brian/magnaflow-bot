@@ -1,8 +1,10 @@
+import ReactMarkdown from 'react-markdown';
+
 export default function MessageBubble({ role, text }) {
   const isBot = role === 'assistant';
   return (
     <div style={{ display: 'flex', justifyContent: isBot ? 'flex-start' : 'flex-end' }}>
-      <div style={{
+      <div className="msg-markdown" style={{
         background: isBot ? '#fff' : '#CC0000',
         color: isBot ? '#222' : '#fff',
         padding: '10px 14px',
@@ -12,7 +14,7 @@ export default function MessageBubble({ role, text }) {
         lineHeight: 1.5,
         boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
       }}>
-        {text}
+        <ReactMarkdown>{text}</ReactMarkdown>
       </div>
     </div>
   );

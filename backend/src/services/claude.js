@@ -126,10 +126,12 @@ export async function chat(conversationHistory, userMessage) {
 
   const assistantMessage = response.content[0].text;
   const fitmentResults = fitmentContext?.matches?.length ? fitmentContext.matches : null;
+  const clarifyingOptions = fitmentContext?.needsQualifier?.length ? fitmentContext.needsQualifier : null;
 
   return {
     message: assistantMessage,
     history: [...updatedHistory, { role: 'assistant', content: assistantMessage }],
     fitmentResults,
+    clarifyingOptions,
   };
 }
