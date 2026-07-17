@@ -4,6 +4,8 @@
 
 A chat + voice bot that qualifies a customer's vehicle (year/make/model/engine/submodel/lift) and returns the exact MagnaFlow SKU, price, sound level, install difficulty, and product link. Built for demo against a seeded slice of the catalog. Schema is ACES/PIES-ready — a full data drop requires no structural changes.
 
+**Current state is fitment lookup, not AI-native.** The bot today is a conversational wrapper around a structured DB query — a customer could get the same result from magnaflow.com's own vehicle picker. See [`AI_FEATURES_ROADMAP.md`](./AI_FEATURES_ROADMAP.md) for a set of scoped feature ideas (VIN/photo vehicle ID, sound-clip matching, compliance concierge, fitment confidence transparency, etc.) that would use vision/reasoning/synthesis in ways a static site structurally can't — pick one up from a fresh session and spec it out from there.
+
 ## Repo
 
 https://github.com/V1-Brian/magnaflow-bot
@@ -276,6 +278,7 @@ From `qa/`: `npm install && npm run verify-catalog` — drives MagnaFlow's real 
 
 | File | Purpose |
 |---|---|
+| `AI_FEATURES_ROADMAP.md` | Scoped ideas for AI-native features beyond fitment lookup — start here for the next big feature push |
 | `backend/src/prompts/system.js` | Claude system prompt — edit qualification flow and tone here |
 | `backend/src/services/claude.js` | Two-pass Claude orchestration — extraction + response, qualifier ambiguity handling |
 | `backend/src/db/schema.sql` | Database schema — authoritative structure for a fresh install |
