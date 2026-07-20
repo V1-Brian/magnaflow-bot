@@ -21,7 +21,16 @@ async function upsertVehicle(client, v) {
      AND COALESCE(submodel,'')=COALESCE($4,'') AND COALESCE(engine_liters,0)=COALESCE($5::numeric,0)`,
     [v.year, v.make, v.model, v.submodel, v.engine_liters]
   );
-  if (existing.rows[0]) return existing.rows[0].id;
+  if (existing.rows[0]) {
+    // Natural key matched, but engine_config/body_style/drive_type can still change on a
+    // catalog.json edit (e.g. correcting a wrong body_style) — keep them in sync rather
+    // than silently ignoring the update.
+    await client.query(
+      `UPDATE vehicles SET engine_config=$2, body_style=$3, drive_type=$4 WHERE id=$1`,
+      [existing.rows[0].id, v.engine_config, v.body_style, v.drive_type]
+    );
+    return existing.rows[0].id;
+  }
   const res = await client.query(
     `INSERT INTO vehicles (year, make, model, submodel, engine_liters, engine_config, body_style, drive_type, source)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual') RETURNING id`,

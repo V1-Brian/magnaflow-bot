@@ -8,7 +8,7 @@
     { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "TRD Off-Road", "engine_liters": 3.5, "engine_config": "V6", "body_style": "Double Cab", "drive_type": "4WD" },
     { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "SR5", "engine_liters": 3.5, "engine_config": "V6", "body_style": "Double Cab", "drive_type": "4WD" },
     { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "SR", "engine_liters": 2.7, "engine_config": "L4", "body_style": "Access Cab", "drive_type": "4WD" },
-    { "year": 2021, "make": "Ford", "model": "F-150", "submodel": "XLT", "engine_liters": 5.0, "engine_config": "V8", "body_style": "SuperCrew", "drive_type": "4WD" },
+    { "year": 2021, "make": "Ford", "model": "F-150", "submodel": "XLT", "engine_liters": 5.0, "engine_config": "V8", "body_style": "Regular Cab", "drive_type": "4WD" },
     { "year": 2021, "make": "Ford", "model": "F-150", "submodel": "Lariat", "engine_liters": 3.5, "engine_config": "V6", "body_style": "SuperCrew", "drive_type": "4WD" },
     { "year": 2020, "make": "Chevrolet", "model": "Silverado 1500", "submodel": "LT", "engine_liters": 5.3, "engine_config": "V8", "body_style": "Crew Cab", "drive_type": "4WD" },
     { "year": 2018, "make": "Ford", "model": "Mustang", "submodel": "GT", "engine_liters": 5.0, "engine_config": "V8", "body_style": "Coupe", "drive_type": "RWD" },
@@ -183,7 +183,7 @@
     { "vehicle": { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "SR5", "engine_liters": 3.5 }, "sku": "19291", "notes": null },
     { "vehicle": { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "TRD Pro", "engine_liters": 3.5 }, "sku": "19293", "notes": null },
     { "vehicle": { "year": 2019, "make": "Toyota", "model": "Tacoma", "submodel": "TRD Pro", "engine_liters": 3.5 }, "sku": "19583", "notes": "Recommended for TRD Pro clearance" },
-    { "vehicle": { "year": 2021, "make": "Ford", "model": "F-150", "submodel": "XLT", "engine_liters": 5.0 }, "sku": "19835", "notes": null },
+    { "vehicle": { "year": 2021, "make": "Ford", "model": "F-150", "submodel": "XLT", "engine_liters": 5.0 }, "sku": "19835", "notes": "Corrected 2026-07-20: body_style was wrongly 'SuperCrew' — MagnaFlow's own product page for this SKU explicitly states it is engineered specifically for regular cab F-150s, confirmed via qa/verify-fitment.js against the live site (19835 never appears for any F-150 5.0L trim/cab combination the site's own vehicle-lookup tool offers)." },
 
     { "vehicle": { "year": 2023, "make": "Toyota", "model": "4Runner", "submodel": "SR5", "engine_liters": 4.0 }, "sku": "15145", "notes": null },
     { "vehicle": { "year": 2023, "make": "Toyota", "model": "4Runner", "submodel": "SR5", "engine_liters": 4.0 }, "sku": "19546", "notes": null },
