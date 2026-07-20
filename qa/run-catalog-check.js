@@ -8,6 +8,19 @@ const catalog = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'backend', 'src', 'db', 'data', 'catalog.json'), 'utf-8')
 );
 
+const partTypeBySku = new Map(catalog.parts.map((p) => [p.sku, p.part_type]));
+
+// MagnaFlow's own site models our one qualifier case (Ram 1500 Classic vs. redesigned)
+// as two separate `model` values ("1500 Classic" vs "1500"), not a sub-field within "1500"
+// the way our schema does — confirmed by inspecting the live site's vehicle picker. This
+// maps our qualifier answer to the site's actual model name for that one case.
+function siteModelFor(vehicle, qualifiers) {
+  if (vehicle.make === 'Ram' && vehicle.model === '1500' && qualifiers.rear_suspension) {
+    return qualifiers.rear_suspension === 'leaf_spring' ? '1500 Classic' : '1500';
+  }
+  return vehicle.model;
+}
+
 const REQUEST_DELAY_MS = 2000; // politeness delay between live-site checks
 
 function vehicleKey(v) {
@@ -75,9 +88,11 @@ async function main() {
       const result = await verifyVehicle({
         year: testCase.vehicle.year,
         make: testCase.vehicle.make,
-        model: testCase.vehicle.model,
+        model: siteModelFor(testCase.vehicle, testCase.qualifiers),
+        submodel: testCase.vehicle.submodel,
+        bodyStyle: testCase.vehicle.body_style,
         engineLiters: testCase.vehicle.engine_liters,
-        qualifiers: testCase.qualifiers,
+        partType: partTypeBySku.get(testCase.expectedSkus[0]),
         expectedSkus: testCase.expectedSkus,
       });
       results.push({ label, qualifiers: testCase.qualifiers, ...result });

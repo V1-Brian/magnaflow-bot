@@ -10,9 +10,16 @@ const PART_TYPE_TO_SITE_CATEGORY = {
   'replacement-exhaust': 'Replacement Exhaust',
 };
 
+function engineDisplayText(engineLiters) {
+  // JS stringifies whole numbers without the trailing zero (String(5.0) === "5"), which
+  // would make the engine search text "5L" instead of "5.0L" — and "5L" is a substring of
+  // "V6 3.5L" too, so a naive substring match can silently select the wrong engine entirely.
+  return `${Number(engineLiters).toFixed(1)}L`;
+}
+
 function engineSlugFragment(engineLiters) {
   // MagnaFlow product URL slugs encode displacement like "3-5l", "5-7l"
-  return `${String(engineLiters).replace('.', '-')}l`;
+  return engineDisplayText(engineLiters).toLowerCase().replace('.', '-');
 }
 
 // The results page shows performance exhaust AND catalytic converters together regardless
@@ -24,7 +31,29 @@ function isCatalyticConverterSlug(slug) {
   return slug.includes('catalytic-converter');
 }
 
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Exact (trimmed) text match, not substring — substring matching is genuinely dangerous
+// here: "1500" is a substring of "1500 Classic", "XL" is a substring of "XLT", and
+// "5L"/"4L"/"0L" are substrings of almost every other engine's displacement text.
+function exactOptionLocator(page, containers, text) {
+  const selector = containers.map((c) => `[data-ymm-el-container="${c}"] [data-ymm-option-btn]`).join(', ');
+  const exact = new RegExp(`^\\s*${escapeRegExp(text)}\\s*$`, 'i');
+  return page.locator(selector).filter({ hasText: exact }).first();
+}
+
 async function clickOption(page, container, text) {
+  const btn = exactOptionLocator(page, [container], text);
+  await btn.waitFor({ state: 'visible', timeout: 8000 });
+  await btn.click();
+}
+
+// Engine buttons include a config prefix we don't always know precisely (e.g. "V6 3.5L"),
+// so substring matching is intentional here — safe now that engineDisplayText always
+// includes the decimal, which is what previously made short numbers collide.
+async function clickOptionContaining(page, container, text) {
   const btn = page.locator(`[data-ymm-el-container="${container}"] [data-ymm-option-btn]`).filter({ hasText: text }).first();
   await btn.waitFor({ state: 'visible', timeout: 8000 });
   await btn.click();
@@ -62,16 +91,15 @@ export async function verifyVehicle({
     await page.locator(`[data-ymm-option-btn="${year}"]`).first().click({ timeout: 8000 });
     await clickOption(page, 'make', make);
     await clickOption(page, 'model', model);
-    await clickOption(page, 'engine_base', engineSlugFragment(engineLiters).replace('-', '.').replace('l', 'L'));
+    await clickOptionContaining(page, 'engine_base', engineDisplayText(engineLiters));
     await clickOption(page, 'part', PART_TYPE_TO_SITE_CATEGORY[partType] ?? 'Performance Exhaust');
     await page.waitForTimeout(500); // let any dynamically-added next field (body_type, etc.) render
 
     // Optionally narrow by trim if the site's next step offers it and we were given one.
+    // Exact match — trim names in practice are short standalone labels ("XL" vs "XLT",
+    // "1500" vs "1500 Classic") where substring matching would risk clicking the wrong one.
     if (submodel) {
-      const trimBtn = page
-        .locator('[data-ymm-el-container="vehicle_details"] [data-ymm-option-btn], [data-ymm-el-container="sub_model"] [data-ymm-option-btn]')
-        .filter({ hasText: submodel })
-        .first();
+      const trimBtn = exactOptionLocator(page, ['vehicle_details', 'sub_model'], submodel);
       if (await trimBtn.count().then((c) => c > 0).catch(() => false)) {
         await trimBtn.click({ timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(500);
@@ -81,11 +109,12 @@ export async function verifyVehicle({
     // Body style (cab/body configuration) can genuinely gate fitment (e.g. a Regular Cab
     // F-150 cat-back that doesn't fit a SuperCrew) — match the site's body_type step to our
     // catalog's own body_style instead of letting the generic fallback below pick blindly.
+    // Exact match: our stored values don't always match the site's fuller label wording
+    // (e.g. our "Crew Cab" vs the site's "Crew Cab Pickup"), so this often won't find a hit
+    // and falls through to the generic fallback below — but that's safer than a substring
+    // match risking a wrong body style (e.g. "Cab" matching several unrelated options).
     if (bodyStyle) {
-      const bodyBtn = page
-        .locator('[data-ymm-el-container="body_type"] [data-ymm-option-btn], [data-ymm-el-container="vehicle_details"] [data-ymm-option-btn]')
-        .filter({ hasText: bodyStyle })
-        .first();
+      const bodyBtn = exactOptionLocator(page, ['body_type', 'vehicle_details'], bodyStyle);
       if (await bodyBtn.count().then((c) => c > 0).catch(() => false)) {
         await bodyBtn.click({ timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(500);
