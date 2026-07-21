@@ -15,8 +15,13 @@ const partTypeBySku = new Map(catalog.parts.map((p) => [p.sku, p.part_type]));
 // the way our schema does — confirmed by inspecting the live site's vehicle picker. This
 // maps our qualifier answer to the site's actual model name for that one case.
 function siteModelFor(vehicle, qualifiers) {
-  if (vehicle.make === 'Ram' && vehicle.model === '1500' && qualifiers.rear_suspension) {
-    return qualifiers.rear_suspension === 'leaf_spring' ? '1500 Classic' : '1500';
+  if (vehicle.make === 'Ram' && vehicle.model === '1500') {
+    // Some vehicle rows carry "Classic" in the submodel itself (e.g. "Classic Warlock",
+    // "Classic Tradesman") with no qualifier row at all — those need "1500 Classic" too,
+    // not just rows explicitly gated on the rear_suspension qualifier.
+    if (qualifiers.rear_suspension === 'leaf_spring') return '1500 Classic';
+    if (qualifiers.rear_suspension === 'coil_spring') return '1500';
+    if (/classic/i.test(vehicle.submodel ?? '')) return '1500 Classic';
   }
   return vehicle.model;
 }

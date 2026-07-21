@@ -117,7 +117,18 @@ export async function verifyVehicle({
         error: `Site's vehicle picker offers no part-type step at all for this engine — it may not sell/list anything for ${year} ${make} ${model} ${engineDisplayText(engineLiters)} via this tool. Check the SKU's own product page directly.`,
       };
     }
-    await clickOption(page, 'part', PART_TYPE_TO_SITE_CATEGORY[partType] ?? 'Performance Exhaust');
+    // Not every vehicle offers every part category — e.g. Jeep Wrangler 3.0L EcoDiesel
+    // only has "Performance Exhaust", with no "Replacement Exhaust" option at all, even
+    // though a real DPF-back product exists for it. Fall back to whatever's actually
+    // offered rather than failing outright on an exact category that isn't there.
+    const desiredCategory = PART_TYPE_TO_SITE_CATEGORY[partType] ?? 'Performance Exhaust';
+    const desiredBtn = exactOptionLocator(page, ['part'], desiredCategory);
+    const desiredAvailable = await desiredBtn.count().then((c) => c > 0).catch(() => false);
+    if (desiredAvailable) {
+      await desiredBtn.click();
+    } else {
+      await page.locator('[data-ymm-el-container="part"] [data-ymm-option-btn]').first().click();
+    }
     await page.waitForTimeout(1000); // let any dynamically-added next field (body_type, etc.) render
 
     // Optionally narrow by trim if the site's next step offers it and we were given one.
