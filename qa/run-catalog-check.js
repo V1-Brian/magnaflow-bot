@@ -21,7 +21,11 @@ function siteModelFor(vehicle, qualifiers) {
   return vehicle.model;
 }
 
-const REQUEST_DELAY_MS = 2000; // politeness delay between live-site checks
+// Confirmed empirically: a 2s delay across ~15 rapid checks triggers something on
+// MagnaFlow's side (rate limiting or bot detection) that silently returns empty results
+// for the rest of the run — cases that pass fine in isolation showed nothing during a full
+// batch run. Raised to 8s; if long batches still go empty partway through, raise further.
+const REQUEST_DELAY_MS = 8000;
 
 function vehicleKey(v) {
   return [v.year, v.make, v.model, v.submodel ?? '', v.engine_liters ?? ''].join('|');
