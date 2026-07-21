@@ -77,4 +77,16 @@ export const CASES = [
     turns: ['2019 Chevy Camaro SS, 6.2L V8'],
     expectSkus: ['19265', '19336', '19266'],
   },
+  {
+    // Live bug found 2026-07-21: reply text asked "is it stock or lifted?" while the API
+    // had already returned both SKUs in fitmentResults — a text/data contradiction (not a
+    // wrong-SKU risk, both parts are correct regardless of lift status). Root cause was
+    // system.js phrasing "always ask this" for lift status like it gates the lookup, when
+    // the code has never treated it as anything but a post-lookup filter (same as sound
+    // preference). Fixed by aligning the wording; this locks in that fitmentResults comes
+    // back on the very first message, not withheld pending a lift-status answer.
+    name: 'Jeep Wrangler 392 6.4L — results present on first message, not withheld for lift status',
+    turns: ['2022 Jeep Wrangler, 6.4L'],
+    expectSkus: ['19582', '19598'],
+  },
 ];
