@@ -180,7 +180,11 @@ export async function verifyVehicle({
           break;
         }
       }
-      if (!clicked) break;
+      // A field can appear only after a preceding one is selected (e.g. Ram 3500 shows
+      // body_type only after trim is chosen) — nothing clickable *yet* doesn't mean nothing
+      // is left, so wait briefly and let the outer loop's remaining iterations retry instead
+      // of giving up immediately.
+      if (!clicked) await page.waitForTimeout(1000);
     }
 
     const submit = page.locator('[data-vehicle-menu-submit]');
