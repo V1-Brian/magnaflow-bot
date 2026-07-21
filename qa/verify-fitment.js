@@ -31,6 +31,12 @@ function isCatalyticConverterSlug(slug) {
   return slug.includes('catalytic-converter');
 }
 
+// The site formats HD truck models with a space ("Silverado 2500 HD") where our catalog
+// doesn't ("Silverado 2500HD") — normalize for the site lookup only, not our own data.
+function siteModelText(model) {
+  return model.replace(/(\d)(HD)\b/i, '$1 $2');
+}
+
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -90,8 +96,18 @@ export async function verifyVehicle({
 
     await page.locator(`[data-ymm-option-btn="${year}"]`).first().click({ timeout: 8000 });
     await clickOption(page, 'make', make);
-    await clickOption(page, 'model', model);
+    await clickOption(page, 'model', siteModelText(model));
     await clickOptionContaining(page, 'engine_base', engineDisplayText(engineLiters));
+
+    const partOptionCount = await page.locator('[data-ymm-el-container="part"] [data-ymm-option-btn]').count();
+    if (partOptionCount === 0) {
+      return {
+        match: false,
+        expected: expectedSkus,
+        found: [],
+        error: `Site's vehicle picker offers no part-type step at all for this engine — it may not sell/list anything for ${year} ${make} ${model} ${engineDisplayText(engineLiters)} via this tool. Check the SKU's own product page directly.`,
+      };
+    }
     await clickOption(page, 'part', PART_TYPE_TO_SITE_CATEGORY[partType] ?? 'Performance Exhaust');
     await page.waitForTimeout(500); // let any dynamically-added next field (body_type, etc.) render
 
