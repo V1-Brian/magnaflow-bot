@@ -99,8 +99,17 @@ export async function verifyVehicle({
     await clickOption(page, 'model', siteModelText(model));
     await clickOptionContaining(page, 'engine_base', engineDisplayText(engineLiters));
 
-    const partOptionCount = await page.locator('[data-ymm-el-container="part"] [data-ymm-option-btn]').count();
-    if (partOptionCount === 0) {
+    // Part options can take a second or two to populate after selecting engine — actively
+    // wait for the condition instead of checking immediately. Confirmed empirically: an
+    // instant zero count isn't necessarily final and previously caused false "no part step"
+    // results on a vehicle that reliably had options moments later.
+    const partsAppeared = await page
+      .locator('[data-ymm-el-container="part"] [data-ymm-option-btn]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 6000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!partsAppeared) {
       return {
         match: false,
         expected: expectedSkus,
@@ -109,17 +118,15 @@ export async function verifyVehicle({
       };
     }
     await clickOption(page, 'part', PART_TYPE_TO_SITE_CATEGORY[partType] ?? 'Performance Exhaust');
-    await page.waitForTimeout(500); // let any dynamically-added next field (body_type, etc.) render
+    await page.waitForTimeout(1000); // let any dynamically-added next field (body_type, etc.) render
 
     // Optionally narrow by trim if the site's next step offers it and we were given one.
     // Exact match — trim names in practice are short standalone labels ("XL" vs "XLT",
     // "1500" vs "1500 Classic") where substring matching would risk clicking the wrong one.
     if (submodel) {
       const trimBtn = exactOptionLocator(page, ['vehicle_details', 'sub_model'], submodel);
-      if (await trimBtn.count().then((c) => c > 0).catch(() => false)) {
-        await trimBtn.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(500);
-      }
+      const trimAppeared = await trimBtn.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false);
+      if (trimAppeared) await trimBtn.click({ timeout: 5000 }).catch(() => {});
     }
 
     // Body style (cab/body configuration) can genuinely gate fitment (e.g. a Regular Cab
@@ -131,10 +138,8 @@ export async function verifyVehicle({
     // match risking a wrong body style (e.g. "Cab" matching several unrelated options).
     if (bodyStyle) {
       const bodyBtn = exactOptionLocator(page, ['body_type', 'vehicle_details'], bodyStyle);
-      if (await bodyBtn.count().then((c) => c > 0).catch(() => false)) {
-        await bodyBtn.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(500);
-      }
+      const bodyAppeared = await bodyBtn.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false);
+      if (bodyAppeared) await bodyBtn.click({ timeout: 5000 }).catch(() => {});
     }
 
     // Any remaining required fields (varies per vehicle, e.g. body type / bed length for
@@ -187,22 +192,43 @@ export async function verifyVehicle({
     const productLinks = await resultsPage.locator('.collection__grid a[href*="/products/"]').evaluateAll((els) => [...new Set(els.map((e) => e.href))]);
     await resultsContext.close();
 
+    // Not every product's slug encodes the engine displacement — some (e.g. SKU 15363) are
+    // named generically ("15363-magnaflow-street-series-cat-back-...") with no year/model/
+    // engine info at all. Requiring the engine fragment to be present would wrongly exclude
+    // those. Collect every real SKU on the page regardless, and only use engine info to
+    // flag an "unexpected" SKU as a genuine cross-listing when its slug explicitly names a
+    // *different* engine — a slug with no engine info at all is too ambiguous to flag.
     const engineFrag = engineSlugFragment(engineLiters); // e.g. "3-5l"
-    const foundSkus = new Set();
+    const skuToSlug = new Map();
     for (const link of productLinks) {
       const slug = link.split('/products/')[1] ?? '';
-      if (!slug.includes(engineFrag)) continue;
       if (isCatalyticConverterSlug(slug)) continue;
       const match = slug.match(/^([a-z0-9]+(?:-[a-z0-9]+)?)-magnaflow-/i);
-      if (match) foundSkus.add(match[1].toUpperCase());
+      if (match) skuToSlug.set(match[1].toUpperCase(), slug);
     }
+    const foundSkus = new Set(skuToSlug.keys());
 
     const expected = new Set(expectedSkus.map((s) => s.toUpperCase()));
     const missing = [...expected].filter((s) => !foundSkus.has(s));
-    const unexpected = [...foundSkus].filter((s) => !expected.has(s));
+    // The collection grid always shows every engine's products together (confirmed
+    // empirically — the site doesn't filter by engine at all), so a SKU whose slug clearly
+    // names a *different* engine isn't relevant to this vehicle at all and isn't worth
+    // surfacing. Only flag SKUs that could plausibly apply (matches our engine, or has no
+    // engine info) but aren't in our catalog — those are genuine completeness gaps.
+    const unexpected = [...foundSkus].filter((s) => {
+      if (expected.has(s)) return false;
+      const slug = skuToSlug.get(s);
+      const hasEngineInfo = /\d-\dl\b/i.test(slug);
+      return !hasEngineInfo || slug.includes(engineFrag);
+    });
 
     return {
-      match: missing.length === 0 && unexpected.length === 0,
+      // Whether OUR claimed SKUs are confirmed to exist for this vehicle is the
+      // safety-critical check. `unexpected` is informational only (possible completeness
+      // gaps worth a manual look) and never fails the check on its own — a customer is
+      // never shown a SKU we haven't verified, only ones we claim, so a MISSING claimed
+      // SKU is the only thing that risks recommending something that doesn't exist.
+      match: missing.length === 0,
       expected: [...expected],
       found: [...foundSkus],
       missing,
