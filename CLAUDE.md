@@ -202,6 +202,44 @@ Vercel auto-deploys on every push to `master` — no manual steps needed after t
 
 ## Next Steps
 
+### Priority 0 — Before the client demo (do this first)
+
+Everything below came out of the most recent round of changes (VIN photo
+scan, one-at-a-time follow-up questions, qualifier-vs-vehicle-field button
+split) — none of it has been verified against real Claude or a real
+deployment yet, only against mocked responses in a sandboxed dev
+environment that had no `ANTHROPIC_API_KEY` and couldn't reach
+`vpic.nhtsa.gov` at all.
+
+1. **Test the VIN photo scan feature with a real phone photo** through the
+   live deployed app. This is the newest and least-verified part of the
+   demo — confirm Claude's vision call actually reads a real VIN plate
+   accurately, and that the NHTSA decode call succeeds (this specific
+   network path has never actually been exercised, only code-reviewed).
+2. **Re-run the smoke tests below (Priority 1, items 1–2)** live, paying
+   specific attention to two prompt-only behavior changes that have never
+   been confirmed against real Claude (Claude's own judgment, not enforced
+   in code):
+   - The bot should ask about only **one** missing detail per message —
+     never bundle 2+ questions into one and expect a single reply to cover
+     both.
+   - Clickable option buttons should appear **only** for genuine fitment
+     qualifiers (e.g. "is it the Ram 1500 or the Classic?"). Vehicle-field
+     ambiguity the customer already knows the answer to (e.g. "is your
+     Camaro the SS or the ZL1?") should be a normal typed follow-up, no
+     buttons.
+3. **Run the conversational test suite** (Priority 1, item 0 below) —
+   fastest way to catch a regression across all of the above before
+   clicking through it live by hand. Needs `ANTHROPIC_API_KEY` added to
+   `backend/.env` in addition to `DATABASE_URL`.
+4. **Confirm the Render web service isn't still on the free tier**, or
+   send it a warm-up request ~1 minute before the client joins. Free tier
+   spins down after 15 minutes idle — a client's first message could
+   otherwise sit for ~30 seconds looking broken.
+
+Once these pass, continue with the rest of Priority 1 below as time
+allows — none of it is as urgent as the four items above.
+
 ### Priority 1 — Verify the live deployment
 
 #### 0. Run the conversational test suite first
