@@ -24,14 +24,18 @@ The qualifier/trim-disambiguation system (Ram 1500 vs. Classic, Camaro SS
 vs. ZL1) exists because customers often can't accurately self-report their
 own vehicle. That's more directly solvable than asking better questions.
 
-- **VIN photo → decode.** Customer photographs the VIN plate (windshield
-  or door jamb). VIN positions 4–8 deterministically encode engine, trim,
-  and often drivetrain via the manufacturer's WMI/VDS scheme. A
-  vision-capable model reads the VIN from the photo; a decode step (NHTSA's
-  free VIN decoder API, or manufacturer-specific tables) resolves exact
-  factory spec — no guessing, no "is it the Classic or the redesigned
-  one," ever. **Highest-leverage fix for the ambiguity problem the
-  qualifier system exists to paper over.**
+- **✅ Shipped (2026-07-21): VIN photo → decode.** Customer photographs the
+  VIN plate; Claude vision reads the 17-character VIN, NHTSA's free vPIC
+  API decodes it to year/make/model/engine/drive type/body style, and the
+  result feeds into the *same* chat/fitment/qualifier pipeline as typed
+  text — no new code path through extraction or fitment. Trim/submodel is
+  deliberately **not** pulled from the VIN decode (NHTSA's Series/Trim
+  field isn't guaranteed to match our catalog's naming, and the client
+  confirmed trim should never be guessed) — so the existing trim-ambiguity
+  follow-up still runs whenever it matters. See `backend/src/services/vin.js`
+  and the "VIN photo vehicle ID" entry in `CLAUDE.md` for the full
+  implementation writeup, including what's verified vs. what still needs a
+  live end-to-end test with a real photo before a demo.
 - **Photo-based trim/badge recognition** as a fallback when there's no VIN
   handy — distinguishing trims by exterior cues, or identifying an
   already-installed aftermarket exhaust from tip shape so the bot doesn't
@@ -129,9 +133,10 @@ The highest-leverage pain point may not even be at purchase time — it's
 
 ## Suggested build order (impact × feasibility)
 
-1. **VIN-photo decode + emissions-sticker OCR** (#1) — most immediately
-   buildable, no new vendor, directly eliminates the ambiguity/recall
-   problems the qualifier system exists to work around.
+1. ~~**VIN-photo decode**~~ (#1) — ✅ shipped 2026-07-21. **Emissions-sticker
+   OCR (still open)** — same #1 idea, same photo-capture pattern, not yet
+   built: reads the EFN/executive-order number and emissions standard off
+   an under-hood sticker instead of asking the customer to recall it.
 2. **Confidence transparency** (#4) — nearly free, mostly a data-tagging
    and prompt change against data already in `catalog.json`.
 3. **Compliance concierge** (#5) — mostly a knowledge/prompt addition.

@@ -1,6 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 
-export default function MessageBubble({ role, text }) {
+export default function MessageBubble({ role, text, imageDataUrl }) {
   const isBot = role === 'assistant';
   return (
     <div style={{ display: 'flex', justifyContent: isBot ? 'flex-start' : 'flex-end' }}>
@@ -14,7 +14,14 @@ export default function MessageBubble({ role, text }) {
         lineHeight: 1.5,
         boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
       }}>
-        <ReactMarkdown>{text}</ReactMarkdown>
+        {imageDataUrl && (
+          <img
+            src={imageDataUrl}
+            alt="Scanned VIN"
+            style={{ display: 'block', maxWidth: 160, borderRadius: 8, marginBottom: text ? 8 : 0 }}
+          />
+        )}
+        {text && <ReactMarkdown>{text}</ReactMarkdown>}
       </div>
     </div>
   );

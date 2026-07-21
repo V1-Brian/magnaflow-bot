@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '8mb' })); // VIN photo uploads are base64 JSON, well over the 100kb default
 app.use(express.urlencoded({ extended: true })); // Required for Twilio webhooks
 
 // Serve ElevenLabs audio files for Twilio to fetch
