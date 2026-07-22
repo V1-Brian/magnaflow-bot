@@ -26,7 +26,12 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
 
   if (year)         { conditions.push(`v.year = $${idx++}`);               values.push(year); }
   if (make)         { conditions.push(`LOWER(v.make) = LOWER($${idx++})`);  values.push(make); }
-  if (model)        { conditions.push(`LOWER(v.model) = LOWER($${idx++})`); values.push(model); }
+  // Prefix match, not exact — some models are stored under a fuller official name than
+  // customers naturally say (e.g. catalog "F-250 Super Duty" vs. a customer's plain "F-250").
+  // Verified safe against the seeded catalog: no two distinct model values share a prefix
+  // relationship (unlike submodel, which does — e.g. "Rubicon" vs "Rubicon 392" — so this
+  // same trick is NOT applied to submodel matching).
+  if (model)        { conditions.push(`LOWER(v.model) LIKE LOWER($${idx++}) || '%'`); values.push(model); }
   if (submodel)     { conditions.push(`LOWER(v.submodel) = LOWER($${idx++})`); values.push(submodel); }
   if (engineLiters) { conditions.push(`v.engine_liters = $${idx++}`);       values.push(engineLiters); }
   if (bodyStyle)    { conditions.push(`LOWER(v.body_style) = LOWER($${idx++})`); values.push(bodyStyle); }

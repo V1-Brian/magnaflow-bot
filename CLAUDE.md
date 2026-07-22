@@ -71,7 +71,7 @@ Separate from `qa/` — this drives the real `chat()` pipeline directly (real Cl
 - `backend/test/conversations/cases.js` — scripted multi-turn conversations with expected/rejected SKUs, or `expectNoFitmentYet: true` for cases that should ask a clarifying question or decline cleanly
 - `backend/test/conversations/run.js` — runner; from `backend/`: `npm run test:conversations` (or `npm run test:conversations "ram"` to filter by name substring while iterating)
 - **Requires `ANTHROPIC_API_KEY` and `DATABASE_URL` in `backend/.env`** — it makes real Anthropic API calls (~2 per conversational turn) and writes to the live `recommendation_log` table (harmless, low-volume)
-- 10/10 passing as of 2026-07-07, covering: Tacoma/F-150 golden paths, both Ram qualifier answers, a not-yet-answered qualifier, a vehicle not in the catalog, and trim-ambiguity for both a real fitment case (Camaro SS-only SKU) and a data-completeness case (Ram)
+- 11/11 passing as of 2026-07-21, covering: Tacoma/F-150 golden paths, both Ram qualifier answers, a not-yet-answered qualifier, a vehicle not in the catalog, trim-ambiguity for both a real fitment case (Camaro SS-only SKU) and a data-completeness case (Ram), and the lift-status regression case (see below)
 
 ### Deployment fixes applied
 - `frontend/package.json` — moved `vite` and `@vitejs/plugin-react` from `devDependencies` to `dependencies` (Vercel runs `npm install --production` and was missing the build tool)
@@ -102,6 +102,34 @@ Found via live testing, not code review — worth understanding before touching 
 - **Trim/body-style/drive-type/engine-config ambiguity when unspecified.** If the customer doesn't state one of these and it isn't pinned down, `lookupParts` now checks whether any candidate part fails to cover every value seen for that field — if so, everything is held back and the customer is asked, the same way an unanswered qualifier works. Confirmed via catalog analysis that this matters for real (2019 Camaro: SKU 19265 is SS-only) and not just for one seeded example. This deliberately costs an extra clarifying question in cases where the divergence is really just incomplete cross-linking in the demo seed data (e.g. Ram) rather than a genuine fitment difference — accepted trade-off, see `backend/test/conversations/cases.js` for the reasoning.
 - **Make-name normalization.** Extraction returned `"Chevy"` while the catalog stores `"Chevrolet"`; the exact-match query silently returned zero rows. Tool schema now instructs the model to normalize to the manufacturer's full name.
 - `lookupParts` also dedupes its `matches` by SKU — the same part can legitimately match through more than one fitment row (e.g. shared across trims), and should never be shown to the customer twice.
+
+### Lift-status text/data inconsistency fix (2026-07-21)
+Live bug report: asking about a 2022 Jeep Wrangler 6.4L, the bot asked "stock height or lifted?" while `fitmentResults` had already come back with both SKUs (19582, 19598) — a text/data contradiction, not a wrong-SKU risk (both parts are correct regardless of lift status). Root cause: `system.js` phrased lift-status as a blocking pre-lookup question while the code had never actually gated on it (lift, like sound preference, is a post-lookup filter). Fixed by aligning the wording. Regression case added to `backend/test/conversations/cases.js` (the Jeep Wrangler 392 case).
+
+### Simulated-customer test harness (2026-07-21)
+The conversational suite above only asserts on final SKUs — it didn't catch the lift-status bug above because the SKUs themselves were correct; the bug was purely in the bot's prose contradicting its own data. To catch this class of bug, `backend/test/simulated-customers/` adds an LLM-plays-customer + LLM-judge harness: a customer persona (`scenarios.js`) improvises naturally through the real `chat()` pipeline (not a fixed script), and a separate forced-tool-use judge call grades the full transcript against a rubric (text/data consistency, one-question-at-a-time, qualifier-button correctness, fabrication, correct SKUs, tone/competitor-avoidance).
+- Run via `npm run test:simulated` from `backend/` (optionally filtered by name substring, same as `test:conversations`). Requires `ANTHROPIC_API_KEY` + `DATABASE_URL`.
+- **Deliberately not run on every commit or as part of CI** — it's ~2-3x the API cost of the conversational suite (customer-simulator calls + judge calls on top of the normal extraction/response calls) and takes 15-25 minutes for the full 10-scenario set. Run it after any change to `system.js`, `claude.js`'s extraction schema, or `fitment.js`'s matching logic — that's where every bug below was found.
+- **Judges can hallucinate** — confirmed directly (a judge once claimed the bot bundled two questions in a turn that, re-read verbatim, only asked one). `run.js`'s `verifyIssueQuotes()` requires every judge-reported issue to include a verbatim quote and cross-checks it against the actual transcript text, tagging anything unverifiable as `[UNVERIFIED QUOTE — possible judge hallucination]` rather than trusting judge prose at face value. Always re-read the real transcript before treating a judge finding as a confirmed bug — several were not (see below).
+- The judge's `noFabrication` check is calibrated against `system.js`'s own sanctioned sound-level/install-difficulty translation phrases (fed into the judge prompt directly), and its `toneAppropriate` check is told explicitly that MagnaFlow is the bot's own brand, not a competitor — both were sources of false-positive findings before being fixed.
+
+**Real bugs found and fixed via 5 iterative rounds of full-suite runs** (each finding was cross-checked against the actual catalog/SQL/transcript before being treated as real — several judge findings turned out to be scenario-ground-truth mistakes or harness artifacts instead, see below):
+- **Fabrication on empty lookups (most severe).** `getFitmentContext` in `claude.js` returned `null` for two different situations — "still gathering info" and "confirmed zero matches" — and `chat()` couldn't tell them apart, so a genuinely empty lookup gave the response pass no signal at all. Claude would sometimes invent a full fake SKU/price/product URL instead of saying "no match," directly contradicting the system prompt's own "never guess" rule. Fixed by having `getFitmentContext` return an explicit `noMatchFound` flag and injecting a system note forbidding invention whenever it's true.
+- **Submodel/model corruption from qualifier-style answers.** When a customer's only stated detail was an answer to a qualifier question (e.g. "it's the Classic"), extraction wrote that word into `submodel` (and, in one regression, `model`) even though no real trim had ever been stated — breaking the exact-match query against the catalog's actual value ("Tradesman") even after the real qualifier was answered correctly. This recurred **twice** in `model` specifically despite explicit prompt guidance, because Claude's own automotive world-knowledge ("Ram 1500 Classic" is a real, well-known nameplate) kept overriding generic instructions — a general "don't overwrite" rule wasn't enough; only a forceful, named prohibition ("never write `model: \"1500 Classic\"`, no matter how confident you are") stopped it. Lesson for future extraction-schema edits: assume the model's real-world knowledge will fight generic normalization instructions, and be prepared to name the specific wrong value explicitly.
+- **Generation/chassis-code confusion.** The bot asked "is it a JK, JL, or JT?" (Jeep Wrangler generation codes, not trim names) and extraction stored the answer as `submodel`, which never matches the catalog's real trim strings ("Rubicon 392"). Fixed by telling the bot to ask for the trim instead, and telling extraction those codes aren't trims.
+- **"F-250"/"Rubicon" false negatives.** Customers naturally say "F-250" or "Rubicon" while the catalog stores the fuller official name ("F-250 Super Duty", "Rubicon 392"). First attempted as an extraction-prompt normalization rule — this is what caused the model-corruption regression above (a "normalize to the fuller name" instruction generalizes dangerously well to "1500 Classic" too). The safe fix ended up split: `submodel` normalization stayed in the extraction prompt (narrowly scoped to "append 392 once the engine is known as 6.4L", which doesn't generalize the same way), while `model` matching moved to the SQL layer instead (`fitment.js` now does a prefix match on `model`, not exact). **Verified safe before implementing** — dumped every distinct `model`/`submodel` value in the catalog and checked for prefix collisions; `model` has none, but `submodel` does (e.g. "Rubicon" is a prefix of "Rubicon 392" *and* a real, different vehicle in its own right — a 3.6L V6 Rubicon genuinely exists — so prefix-matching submodel would conflate two different engines' parts and was correctly avoided).
+- **Readiness gate too coarse.** `ready` only requires year+make+model, so a lookup could come back empty simply because engine wasn't known yet (not because the vehicle doesn't exist), and the new `noMatchFound` signal was firing prematurely. Fixed by requiring `engineLiters` to be known before declaring a confident "no match."
+- **Withholding results generalized beyond lift/sound.** The original lift-status fix only covered lift and sound preference explicitly; the same bug recurred for engine ("I have a match, but I need one more detail first" while `fitmentResults` was already populated). Generalized the system.js rule to cover any field, not just those two.
+- **Fabricated escalation contact info.** The bot has no real phone number or contact channel anywhere in its data, but the prompt said "offer to escalate to a human advisor" with nothing concrete to point to — so it invented phone numbers (once a nonsensical "1-800-regardless"). Fixed by telling it explicitly it has no real contact info and to point to MagnaFlow's own website generically instead of inventing a number.
+- **Invented excuses for limitations.** When declining to show a part, the bot sometimes invented a specific-sounding reason ("probably a cab/bed configuration gap," "there may be options my system isn't showing") rather than admitting it doesn't know why. Added an explicit rule against this.
+
+**Two of my own scenario-design mistakes, corrected** (worth noting so future scenario authors don't repeat them): one scenario's `expectSkus` included SKU 19206 for a cat-back-specific request — 19206 is a real match for that vehicle, but it's an axle-back product, so its absence was correct, not a bug. Another's `rejectSkus` included a SKU that was genuinely correct for the customer's own (later self-corrected) initial engine statement — showing it before the correction was right, not a bug. Both are reminders to check ground truth against the actual catalog fields (not just "does this SKU exist for this vehicle") before trusting a judge failure.
+
+**Known residual limitations, not fully solved this session** (real but lower-severity than the above — none of them produce a *wrong* SKU, the worst outcomes are an unnecessary "no match" or an embellished sound description):
+- **Sound/spec embellishment.** Despite an explicit "only state what's in the data" rule, Claude still occasionally adds unsupported editorial color (e.g. "no drone, no obnoxious startup bark," comparative "more refined tone" between two products with the identical `sound_level` value). Tried multiple rounds of prompt tightening with diminishing returns — this looks like an inherent tendency to elaborate helpfully rather than a fixable prompt gap. Lower risk than a wrong SKU, but worth another look if a client flags it.
+- **Extraction non-determinism across turns.** Since extraction re-runs fresh from the full conversation history every turn, it can occasionally give a different answer for unchanged context — observed as a transient false "no match" that flips back to a correct match one turn later with no new customer input. Doesn't produce a wrong SKU (worst case: a customer is confusingly told "no match," then immediately corrected), but is a trust/UX wrinkle. A real fix would mean caching the last confirmed match per conversation rather than trusting a fresh extraction every turn — not attempted this session.
+- **Bare ambiguous model names** (e.g. a customer saying just "Super Duty" without specifying F-250 vs. F-350) have no disambiguation path — `model` isn't one of `fitment.js`'s `AMBIGUITY_DIMENSIONS` (only submodel/body_style/drive_type/engine_config are), so an unresolvable model-level ambiguity currently just returns zero rows rather than prompting a clarifying question. Fails safe (no wrong part shown) but could ask for retrieval a step earlier.
+- Occasional two-question bundling still slips through despite the explicit one-at-a-time rule, most often "here's your part... also, stock or lifted?" appended in the same turn as a result. Same category as sound embellishment — prompt-adherence, not a code bug.
 
 ### Catalog verification against the live site (2026-07-21)
 `qa/verify-fitment.js` was originally written blind (selectors never validated against the live DOM) — running it for real turned up both a genuine catalog error and a string of tool bugs. Full batch now passes **82/83 (98.8%)** against the live site.
@@ -216,22 +244,19 @@ environment that had no `ANTHROPIC_API_KEY` and couldn't reach
    demo — confirm Claude's vision call actually reads a real VIN plate
    accurately, and that the NHTSA decode call succeeds (this specific
    network path has never actually been exercised, only code-reviewed).
-2. **Re-run the smoke tests below (Priority 1, items 1–2)** live, paying
-   specific attention to two prompt-only behavior changes that have never
-   been confirmed against real Claude (Claude's own judgment, not enforced
-   in code):
-   - The bot should ask about only **one** missing detail per message —
-     never bundle 2+ questions into one and expect a single reply to cover
-     both.
-   - Clickable option buttons should appear **only** for genuine fitment
-     qualifiers (e.g. "is it the Ram 1500 or the Classic?"). Vehicle-field
-     ambiguity the customer already knows the answer to (e.g. "is your
-     Camaro the SS or the ZL1?") should be a normal typed follow-up, no
-     buttons.
+2. ~~Re-run the smoke tests below (Priority 1, items 1–2) live~~ — **done
+   2026-07-21** via the new `backend/test/simulated-customers/` harness (5
+   rounds of real-Claude runs, not mocks). Qualifier-button correctness now
+   holds reliably. One-question-at-a-time mostly holds but still slips
+   occasionally (e.g. "here's your part... also, stock or lifted?" in one
+   message) — see "Simulated-customer test harness" under Completed for the
+   full list of what was found and fixed vs. what remains a known,
+   lower-severity residual limitation.
 3. **Run the conversational test suite** (Priority 1, item 0 below) —
    fastest way to catch a regression across all of the above before
    clicking through it live by hand. Needs `ANTHROPIC_API_KEY` added to
-   `backend/.env` in addition to `DATABASE_URL`.
+   `backend/.env` in addition to `DATABASE_URL`. 11/11 passing as of
+   2026-07-21.
 4. **Confirm the Render web service isn't still on the free tier**, or
    send it a warm-up request ~1 minute before the client joins. Free tier
    spins down after 15 minutes idle — a client's first message could
@@ -354,6 +379,8 @@ From `qa/`: `npm install && npm run verify-catalog` — drives MagnaFlow's real 
 | `qa/spot-check.js` | Samples `recommendation_log` for live spot-checks — not yet on a schedule |
 | `backend/test/conversations/cases.js` | Scripted multi-turn conversations + expected SKUs — add a case here after any live bug |
 | `backend/test/conversations/run.js` | Runs the conversational suite against the real Claude + Postgres pipeline |
+| `backend/test/simulated-customers/scenarios.js` | LLM-customer personas + ground truth for the deeper conversational-quality harness |
+| `backend/test/simulated-customers/run.js` | Runs customer-simulator + real chat() + LLM judge; expensive, not run on every commit — see write-up above |
 
 ## Claude Model
 

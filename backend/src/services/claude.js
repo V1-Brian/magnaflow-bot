@@ -15,10 +15,13 @@ const EXTRACT_VEHICLE_PARAMS_TOOL = {
         type: ['string', 'null'],
         description: 'The manufacturer\'s full standard name, not a nickname or abbreviation (e.g. "Chevrolet" not "Chevy", "Cadillac" not "Caddy"). Normalize even if the customer used the colloquial form.',
       },
-      model: { type: ['string', 'null'] },
+      model: {
+        type: ['string', 'null'],
+        description: 'The vehicle model. IMPORTANT: even though "Ram 1500 Classic" is a real, commonly-known nameplate, our database always stores the model as plain "1500" — never write "1500 Classic", "1500 Classic Tradesman", or any other Classic-suffixed value here, no matter how confident you are that\'s the vehicle\'s real name or how much conversation context (trim, suspension answer) supports it. The Classic/redesigned distinction belongs only in the qualifiers field below, never appended to model.',
+      },
       submodel: {
         type: ['string', 'null'],
-        description: 'The trim level the customer stated for their vehicle (e.g. "Tradesman", "Rebel", "Laramie", "TRD Off-Road"). If the customer already gave a trim earlier in the conversation, do not overwrite it with their answer to a later qualifier question (e.g. "Classic", "redesigned", "DT body") — those answers go in the qualifiers field below instead, even if they sound like they could be a trim. Only change this field if the customer explicitly states a different trim for their vehicle.',
+        description: 'The trim level the customer stated for their vehicle (e.g. "Tradesman", "Rebel", "Laramie", "TRD Off-Road"), normalized to the fuller official trim name MagnaFlow lists it under when a specific engine implies a suffix the customer didn\'t say — e.g. a Jeep Wrangler "Rubicon" with the 6.4L V8 is marketed as "Rubicon 392"; include that suffix once the engine is known even if the customer only said "Rubicon". Never set this field from a word that answers a qualifier or body-generation question rather than naming an actual trim — e.g. "Classic", "redesigned", "DT body", "JK", "JL", "JT" are generation/body/suspension answers, not trims, and belong in the qualifiers field below instead (or nowhere, if the system has no qualifier for them). This applies whether or not a trim was already set — if the customer has never stated an actual named trim, leave this field null even after they answer a qualifier question, rather than filling it in from that answer. Only set or change this field when the customer explicitly names a real trim level for their vehicle.',
       },
       engineLiters: { type: ['number', 'null'] },
       bodyStyle: {
@@ -74,17 +77,22 @@ async function getFitmentContext(conversationHistory) {
   const { matches, needsQualifier } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
   console.log(`lookupParts -> ${matches.length} match(es), needsQualifier: ${JSON.stringify(needsQualifier.map((n) => n.qualifierType))}`);
 
-  if (needsQualifier.length > 0) return { matches: [], needsQualifier };
+  if (needsQualifier.length > 0) return { matches: [], needsQualifier, noMatchFound: false };
   if (matches.length === 0) {
     console.error('No fitment matches for extracted params:', JSON.stringify(params));
-    return null;
+    // Engine is the single biggest disambiguator we still might not have (e.g. a bare
+    // trim name can genuinely belong to more than one real vehicle with different engine
+    // options) — don't declare a confident "no match" until it's known, or a customer who
+    // simply hasn't given their engine yet gets wrongly told their vehicle isn't supported.
+    if (params.engineLiters == null) return null;
+    return { matches: [], needsQualifier: [], noMatchFound: true };
   }
 
   logRecommendation({ ...params, skus: matches.map((m) => m.sku) }).catch((err) =>
     console.error('recommendation_log insert failed:', err)
   );
 
-  return { matches, needsQualifier: [] };
+  return { matches, needsQualifier: [], noMatchFound: false };
 }
 
 export async function chat(conversationHistory, userMessage) {
@@ -116,6 +124,14 @@ export async function chat(conversationHistory, userMessage) {
       {
         role: 'user',
         content: `[SYSTEM FITMENT DATA — do not repeat this to the customer, use it to form your recommendation]:\n${JSON.stringify(fitmentContext.matches, null, 2)}`,
+      },
+    ];
+  } else if (fitmentContext?.noMatchFound) {
+    messagesForClaude = [
+      ...updatedHistory,
+      {
+        role: 'user',
+        content: `[SYSTEM: the database has no fitment match for this exact vehicle/part combination. Do not invent a SKU, price, sound level, or product link — tell the customer plainly that you don't have a confirmed match for their vehicle. Suggest reaching out through MagnaFlow's website for a human advisor; do not invent a phone number or specific contact channel, since you don't have one.]`,
       },
     ];
   }
