@@ -36,7 +36,13 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
   if (engineLiters) { conditions.push(`v.engine_liters = $${idx++}`);       values.push(engineLiters); }
   if (bodyStyle)    { conditions.push(`LOWER(v.body_style) = LOWER($${idx++})`); values.push(bodyStyle); }
   if (driveType)    { conditions.push(`LOWER(v.drive_type) = LOWER($${idx++})`); values.push(driveType); }
-  if (engineConfig) { conditions.push(`LOWER(v.engine_config) = LOWER($${idx++})`); values.push(engineConfig); }
+  // Contains match, not exact — engine_config values pair a base config with an optional
+  // suffix (e.g. "V6 EcoDiesel", "V8 Power Stroke Diesel"), and extraction commonly gives
+  // just the base ("V6") even when the customer meant the specific variant, since engineLiters
+  // is what actually narrows it and engineConfig is asked/answered as an afterthought. Verified
+  // safe against the seeded catalog: every base value (V6, V8, I4, L4, V6 Twin-Turbo) is a
+  // genuine prefix of its longer variant(s), with no unrelated cross-matches between bases.
+  if (engineConfig) { conditions.push(`LOWER(v.engine_config) LIKE '%' || LOWER($${idx++}) || '%'`); values.push(engineConfig); }
   if (partType)     { conditions.push(`LOWER(p.part_type) = LOWER($${idx++})`); values.push(partType); }
   if (lifted)       { conditions.push(`p.is_lifted_compatible = true`); }
 
@@ -45,6 +51,7 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
       v.submodel AS vehicle_submodel,
       v.body_style AS vehicle_body_style,
       v.drive_type AS vehicle_drive_type,
+      v.engine_liters AS vehicle_engine_liters,
       v.engine_config AS vehicle_engine_config,
       p.sku,
       p.series,
@@ -69,17 +76,26 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
     LEFT JOIN fitment_qualifiers fq ON fq.fitment_id = f.id
     LEFT JOIN qualifiers q ON q.id = fq.qualifier_id
     WHERE ${conditions.join(' AND ')}
-    GROUP BY f.id, p.id, f.notes, v.submodel, v.body_style, v.drive_type, v.engine_config
+    GROUP BY f.id, p.id, f.notes, v.submodel, v.body_style, v.drive_type, v.engine_liters, v.engine_config
     ORDER BY p.price ASC
   `;
 
   const result = await pool.query(query, values);
 
+  // Engine displacement and engine config are tracked as one combined dimension, not two —
+  // some vehicles only differ by displacement (e.g. a 3.6L gas V6 vs. a 3.0L EcoDiesel V6,
+  // same config label), others only by config at the same displacement. Asking about them
+  // separately would mean two back-to-back "which engine" questions for the same fact.
+  const engineLabel = (liters, config) => {
+    if (liters == null) return config || null;
+    return config ? `${liters}L ${config}` : `${liters}L`;
+  };
+
   const AMBIGUITY_DIMENSIONS = [
     { given: submodel, column: 'vehicle_submodel', qualifierType: 'trim' },
     { given: bodyStyle, column: 'vehicle_body_style', qualifierType: 'body_style' },
     { given: driveType, column: 'vehicle_drive_type', qualifierType: 'drive_type' },
-    { given: engineConfig, column: 'vehicle_engine_config', qualifierType: 'engine_config' },
+    { given: engineLiters, column: 'vehicle_engine', qualifierType: 'engine' },
   ].filter((d) => !d.given);
 
   const matchesBySku = new Map();
@@ -88,12 +104,12 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
   const dimValuesBySku = new Map(AMBIGUITY_DIMENSIONS.map((d) => [d.qualifierType, new Map()]));
 
   for (const row of result.rows) {
-    const { required_qualifiers, vehicle_submodel, vehicle_body_style, vehicle_drive_type, vehicle_engine_config, ...part } = row;
+    const { required_qualifiers, vehicle_submodel, vehicle_body_style, vehicle_drive_type, vehicle_engine_liters, vehicle_engine_config, ...part } = row;
     const rowDimValues = {
       trim: vehicle_submodel,
       body_style: vehicle_body_style,
       drive_type: vehicle_drive_type,
-      engine_config: vehicle_engine_config,
+      engine: engineLabel(vehicle_engine_liters, vehicle_engine_config),
     };
 
     for (const dim of AMBIGUITY_DIMENSIONS) {
