@@ -4,6 +4,7 @@ import MessageBubble from './MessageBubble';
 import PartCard from './PartCard';
 import OptionButtons from './OptionButtons';
 import VinPhotoButton from './VinPhotoButton';
+import TypingIndicator from './TypingIndicator';
 
 const API_URL = import.meta.env.VITE_API_URL;
 const SESSION_ID = uuidv4();
@@ -126,7 +127,7 @@ export default function ChatWidget() {
           </div>
         ))}
         {pendingPhoto && <MessageBubble role="user" text="" imageDataUrl={pendingPhoto} />}
-        {loading && <MessageBubble role="assistant" text="..." />}
+        {loading && <TypingIndicator />}
         {clarifyingOptions?.length > 0 && !loading && (
           <OptionButtons groups={clarifyingOptions} onSelect={sendMessage} disabled={loading} />
         )}
