@@ -33,7 +33,7 @@ function resizeImageToBase64(file) {
 
 export default function ChatWidget() {
   const [messages, setMessages] = useState([
-    { role: 'assistant', text: "Hi! I'm the MagnaFlow Parts Advisor. Tell me about your vehicle — year, make, model, and engine if you know it, or scan your VIN." }
+    { role: 'assistant', text: "Hi! I'm the MagnaFlow Parts Advisor. Let's find the right part for you.\n\n- Year, make, model, and engine, if you know it (or scan your VIN)\n- Looking for something specific (cat-back, axle-back, etc.), or want to see everything that fits?" }
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);

@@ -157,10 +157,12 @@ export async function chat(conversationHistory, userMessage) {
 
   const assistantMessage = response.content[0].text;
   const fitmentResults = fitmentContext?.matches?.length ? fitmentContext.matches : null;
-  // Only genuine fitment qualifiers get presented as clickable options — vehicle
-  // fields (trim, body style, etc.) are things the customer already knows and
-  // should just type in response to the question above.
-  const clarifyingOptions = primaryQualifier?.kind === 'qualifier' ? [primaryQualifier] : null;
+  // Both genuine fitment qualifiers (leaf/coil suspension) and vehicle-identifying
+  // fields (trim, body style, drive type, engine) get clickable options — both are
+  // always a small closed list pulled straight from the catalog, and a clicked label
+  // round-trips verbatim into the next extraction pass instead of relying on the model
+  // to re-map a freely typed reply back onto the exact stored value.
+  const clarifyingOptions = primaryQualifier ? [primaryQualifier] : null;
 
   return {
     message: assistantMessage,

@@ -89,4 +89,44 @@ export const CASES = [
     turns: ['2022 Jeep Wrangler, 6.4L'],
     expectSkus: ['19582', '19598'],
   },
+  {
+    // Live bug found 2026-07-23: the catalog stored "EcoDiesel" in the submodel field as
+    // a workaround, since fitment.js had no ambiguity dimension for engine displacement on
+    // its own (only trim/body style/drive type/engine config) — the gas and diesel 2021
+    // Wranglers share the same engine_config ("V6"), so nothing else distinguished them.
+    // The bot asked "Rubicon or EcoDiesel?" as if picking a trim, which is wrong (a real
+    // Rubicon can have either engine). Fixed via a merged engine (displacement + config)
+    // ambiguity dimension. This case locks in that a bare "2021 Jeep Wrangler" with no
+    // engine given holds back results and asks — not just for this catalog, but for any
+    // future data with multiple engine options on the same trim, which real ACES data will
+    // have far more of than this demo catalog does.
+    name: 'Jeep Wrangler, no engine given — should ask about engine, not guess or mislabel as trim',
+    turns: ['2021 Jeep Wrangler'],
+    expectNoFitmentYet: true,
+  },
+  {
+    name: 'Jeep Wrangler EcoDiesel — engine answered naturally, should resolve to the diesel-specific SKU',
+    turns: ['2021 Jeep Wrangler', 'the ecodiesel one'],
+    expectSkus: ['19505'],
+    rejectSkus: ['19620', '19592', '19388'],
+  },
+  {
+    name: 'Jeep Wrangler 3.6L gas — engine given directly, should resolve to the gas SKUs',
+    turns: ['2021 Jeep Wrangler, 3.6L V6'],
+    expectSkus: ['19620', '19592', '19388'],
+    rejectSkus: ['19505'],
+  },
+  {
+    // Live bug found 2026-07-23: with no part type specified, the bot returned all 3 SKUs
+    // (two Overland Series, one Street) but the reply text didn't explain that two of them
+    // are different part types (cat-back vs. axle-back) sharing a series name — read as
+    // duplicates. Fixed in system.js (explain the distinction before sound/price) and by
+    // no longer restating full specs in prose (PartCard already renders them, so repeating
+    // them buried the distinction). This case locks in that all matching part types are
+    // still returned together, not narrowed to one without being asked — the same shape of
+    // bug (multiple part types under one series) will recur under real PIES data too.
+    name: 'Jeep Wrangler Rubicon, no part type given — should return all part types, not just one',
+    turns: ['2021 Jeep Wrangler Rubicon'],
+    expectSkus: ['19620', '19592', '19388'],
+  },
 ];

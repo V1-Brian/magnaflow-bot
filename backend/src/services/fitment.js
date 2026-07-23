@@ -158,10 +158,9 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
   const matches = [...matchesBySku.values()];
 
   // 'qualifier' entries are genuine fitment qualifiers (e.g. leaf vs. coil rear
-  // suspension) the customer often can't name unprompted — worth presenting as
-  // choices. 'vehicle_field' entries (trim/body style/drive type/engine config)
-  // are things the customer already knows about their own vehicle and can just
-  // type in response to a normal follow-up question.
+  // suspension); 'vehicle_field' entries are trim/body style/drive type/engine.
+  // Both render as clickable options in claude.js — kept as separate kinds here
+  // in case the two ever need different phrasing or presentation later.
   const needsQualifier = [...pendingByType.entries()].map(([qualifierType, { kind, values }]) => ({
     qualifierType,
     kind,
