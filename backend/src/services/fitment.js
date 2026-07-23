@@ -152,7 +152,17 @@ export async function lookupParts({ year, make, model, submodel, engineLiters, b
     options: [...values.entries()].map(([value, label]) => ({ value, label })),
   }));
 
-  return { matches, needsQualifier };
+  // A specific part type was requested and nothing matched (not even blocked on a
+  // qualifier) — before declaring a dead end, check whether the vehicle matches
+  // something under a *different* part type. "No axle-back for your Tacoma, but
+  // here's the cat-back we do have" is very different from "nothing fits your truck."
+  let otherPartTypeMatches = null;
+  if (partType && matches.length === 0 && needsQualifier.length === 0) {
+    const withoutPartType = await lookupParts({ year, make, model, submodel, engineLiters, bodyStyle, driveType, engineConfig, partType: null, lifted, qualifiers });
+    if (withoutPartType.matches.length > 0) otherPartTypeMatches = withoutPartType.matches;
+  }
+
+  return { matches, needsQualifier, otherPartTypeMatches };
 }
 
 // Fire-and-forget log of a final recommendation, sampled later by qa/spot-check.js

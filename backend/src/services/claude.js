@@ -74,10 +74,10 @@ async function getFitmentContext(conversationHistory) {
 
   if (!params.ready) return null;
 
-  const { matches, needsQualifier } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
+  const { matches, needsQualifier, otherPartTypeMatches } = await lookupParts({ ...params, qualifiers: params.qualifiers ?? {} });
   console.log(`lookupParts -> ${matches.length} match(es), needsQualifier: ${JSON.stringify(needsQualifier.map((n) => n.qualifierType))}`);
 
-  if (needsQualifier.length > 0) return { matches: [], needsQualifier, noMatchFound: false };
+  if (needsQualifier.length > 0) return { matches: [], needsQualifier, noMatchFound: false, otherPartTypeMatches: null };
   if (matches.length === 0) {
     console.error('No fitment matches for extracted params:', JSON.stringify(params));
     // Engine is the single biggest disambiguator we still might not have (e.g. a bare
@@ -85,14 +85,17 @@ async function getFitmentContext(conversationHistory) {
     // options) — don't declare a confident "no match" until it's known, or a customer who
     // simply hasn't given their engine yet gets wrongly told their vehicle isn't supported.
     if (params.engineLiters == null) return null;
-    return { matches: [], needsQualifier: [], noMatchFound: true };
+    if (otherPartTypeMatches?.length) {
+      return { matches: [], needsQualifier: [], noMatchFound: false, otherPartTypeMatches };
+    }
+    return { matches: [], needsQualifier: [], noMatchFound: true, otherPartTypeMatches: null };
   }
 
   logRecommendation({ ...params, skus: matches.map((m) => m.sku) }).catch((err) =>
     console.error('recommendation_log insert failed:', err)
   );
 
-  return { matches, needsQualifier: [], noMatchFound: false };
+  return { matches, needsQualifier: [], noMatchFound: false, otherPartTypeMatches: null };
 }
 
 export async function chat(conversationHistory, userMessage) {
@@ -124,6 +127,15 @@ export async function chat(conversationHistory, userMessage) {
       {
         role: 'user',
         content: `[SYSTEM FITMENT DATA — do not repeat this to the customer, use it to form your recommendation]:\n${JSON.stringify(fitmentContext.matches, null, 2)}`,
+      },
+    ];
+  } else if (fitmentContext?.otherPartTypeMatches?.length) {
+    const otherTypes = [...new Set(fitmentContext.otherPartTypeMatches.map((m) => m.part_type))];
+    messagesForClaude = [
+      ...updatedHistory,
+      {
+        role: 'user',
+        content: `[SYSTEM: the customer asked for a part type that isn't available for this exact vehicle, but other part type(s) are: ${otherTypes.join(', ')}. Tell them plainly you don't have their requested type for this vehicle — do not say there's no match at all, since parts do exist. Mention what IS available (part type and series name only) and ask if they'd like to see it. Do not list price, SKU, or product link yet — only once they say yes. Available series/types:\n${JSON.stringify(fitmentContext.otherPartTypeMatches.map((m) => ({ series: m.series, part_type: m.part_type })), null, 2)}]`,
       },
     ];
   } else if (fitmentContext?.noMatchFound) {
